@@ -1,0 +1,18 @@
+:root {
+  --primary: #4F633F;
+  --bg: #F8FAFC;
+  --text: #111827;
+}
+body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
+.pita-luring {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.9rem;
+  background: #FEF3C7; color: #78350F; border-bottom: 1px solid #FCD34D;
+  font-size: 0.82rem;
+}
+.pita-luring-bahaya { background: #FEE2E2; color: #7F1D1D; border-bottom-color: #FCA5A5; }
+.pita-luring-tombol {
+  background: #78350F; color: #fff; border: 0; border-radius: 6px;
+  padding: 0.25rem 0.6rem; font-size: 0.78rem; font-weight: 600; cursor: pointer;
+}
+.pita-luring-samar { opacity: 0.85; }
