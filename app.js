@@ -18,7 +18,7 @@ var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbxh4086qGRZGDqA
 // service worker yang benar-benar aktif (lihat syncVersionFromCache).
 // Dengan begitu rilis cukup mengubah CACHE di sw.js; angka di sini tak bisa lagi
 // tertinggal diam-diam seperti dulu (APP_VERSION v26 vs CACHE v34).
-var APP_VERSION = 'projek-v5'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'projek-v6'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 
 // ── Pembaruan versi otomatis ────────────────────────────────────────────────
 // sw.js sudah skipWaiting()+clients.claim(), jadi versi baru mengambil alih
@@ -1320,12 +1320,12 @@ function setelMeterCreate() {
    jadi satu cluster punya dua nama dan dua rupa tergantung layar mana yang
    dibuka. Kalau daftar ini berubah di GAS, ubah di sini juga. */
 var LABEL_SECTION = {
-  vessel:      '🚛 Rekondisi Vessel',
+  vessel:      '🚛 Rekondisi',
   maintenance: '🚜 Maintenance',
   workshop:    '🏭 Workshop',
   field:       '🚜 Maintenance',
-  tyreman:     '🚛 Rekondisi Vessel',
-  tyre:        '🚛 Rekondisi Vessel'
+  tyreman:     '🚛 Rekondisi',
+  tyre:        '🚛 Rekondisi'
 };
 
 /* Nama cluster tenant ini: vessel, maintenance, workshop. Nama lama
