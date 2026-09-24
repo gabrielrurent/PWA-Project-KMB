@@ -18,7 +18,7 @@ var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbxh4086qGRZGDqA
 // service worker yang benar-benar aktif (lihat syncVersionFromCache).
 // Dengan begitu rilis cukup mengubah CACHE di sw.js; angka di sini tak bisa lagi
 // tertinggal diam-diam seperti dulu (APP_VERSION v26 vs CACHE v34).
-var APP_VERSION = 'projek-v6'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'projek-v7'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 
 // ── Pembaruan versi otomatis ────────────────────────────────────────────────
 // sw.js sudah skipWaiting()+clients.claim(), jadi versi baru mengambil alih
@@ -1310,7 +1310,7 @@ function setelMeterCreate() {
   var k = document.getElementById('cMeterKaki');
   if (k) {
     k.textContent = (M.jenis === 'km')
-      ? 'Kilometer unit saat pekerjaan ini dimulai. Dipakai menghitung umur pakai tyre.'
+      ? 'Kilometer unit saat pekerjaan ini dimulai.'
       : 'Hour meter unit saat pekerjaan ini dimulai. Dipakai menghitung MTBF unit.';
   }
 }
@@ -1889,7 +1889,7 @@ function _bacaBarisCreate() {
     var compSel = document.getElementById('cComp');
     var unitSel = document.getElementById('cTyreUnit');
     var comp = compSel.value, unit = unitSel.value;
-    if (!comp) return {payload:null, label:'', err:'Pilih joblist tyreman'};
+    if (!comp) return {payload:null, label:'', err:'Pilih joblist mekanik'};
     if (!unit) return {payload:null, label:'', err:'Pilih unit'};
     payload.component_id = comp; payload.unit_id = unit;
     label = _teksOpsi(compSel) + ' @ ' + _teksOpsi(unitSel);
@@ -2982,7 +2982,7 @@ function timKerjaStr(team) {
 function renderCreateTab(el) {
   if (!S.refs) { el.innerHTML='<div class="empty">Tekan 🔄 Refresh untuk memuat data referensi.</div>'; return; }
   el.innerHTML='<button class="big" onclick="openCreateForm()" style="margin-bottom:12px">➕ Buat Work Order Baru</button>'+
-    '<div class="sub">Data referensi: '+(S.refs.jobs_field||[]).length+' job field, '+(S.refs.jobs_workshop||[]).length+' job WS, '+(S.refs.components||[]).length+' komponen tyreman</div>';
+    '<div class="sub">Data referensi: '+(S.refs.jobs_field||[]).length+' job field, '+(S.refs.jobs_workshop||[]).length+' job WS, '+(S.refs.components||[]).length+' komponen rekondisi</div>';
 }
 function wcLabel(wc){ return wc==='normal'?'Shift 1':wc==='difficult'?'Shift 2':wc==='extreme'?'Kondisi Ekstrim':(wc||'-'); }
 function partLabel(p){ return p==='baru'?'🆕 Sparepart Baru':p==='repair'?'🔧 Repair':p==='kanibal'?'♻️ Kanibal':(p||'Tanpa Part'); }
