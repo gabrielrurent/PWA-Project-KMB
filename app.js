@@ -18,7 +18,7 @@ var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbxh4086qGRZGDqA
 // service worker yang benar-benar aktif (lihat syncVersionFromCache).
 // Dengan begitu rilis cukup mengubah CACHE di sw.js; angka di sini tak bisa lagi
 // tertinggal diam-diam seperti dulu (APP_VERSION v26 vs CACHE v34).
-var APP_VERSION = 'projek-v4'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'projek-v5'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 
 // ── Pembaruan versi otomatis ────────────────────────────────────────────────
 // sw.js sudah skipWaiting()+clients.claim(), jadi versi baru mengambil alih
@@ -1142,9 +1142,8 @@ function openCreateForm() {
   var secs = S.refs.sections || [];
   var secHtml = '';
   for (var si=0;si<secs.length;si++) {
-    var icons = {vessel:'🚢',maintenance:'🔧',workshop:'🏭',tyreman:'🚢',field:'🔧'};
     secHtml += '<label class="secOpt"><input type="radio" name="cSec" value="'+secs[si]+'"'+(si===0?' checked':'')+'>'+
-               '<span class="secCard">'+(icons[secs[si]]||'')+' '+secs[si]+'</span></label>';
+               '<span class="secCard">'+(LABEL_SECTION[secs[si]] || secs[si])+'</span></label>';
   }
   document.getElementById('cSecPicker').innerHTML = secHtml;
   document.getElementById('cWc').innerHTML = '';
@@ -1315,6 +1314,19 @@ function setelMeterCreate() {
       : 'Hour meter unit saat pekerjaan ini dimulai. Dipakai menghitung MTBF unit.';
   }
 }
+
+/* Ikon + label section — 1:1 dengan sectionRadiosHtml() di WorkOrder.html.
+   Dulu PWA menampilkan kunci mentah ("vessel") dengan ikon yang berbeda pula,
+   jadi satu cluster punya dua nama dan dua rupa tergantung layar mana yang
+   dibuka. Kalau daftar ini berubah di GAS, ubah di sini juga. */
+var LABEL_SECTION = {
+  vessel:      '🚛 Rekondisi Vessel',
+  maintenance: '🚜 Maintenance',
+  workshop:    '🏭 Workshop',
+  field:       '🚜 Maintenance',
+  tyreman:     '🚛 Rekondisi Vessel',
+  tyre:        '🚛 Rekondisi Vessel'
+};
 
 /* Nama cluster tenant ini: vessel, maintenance, workshop. Nama lama
    (tyreman/tyre, field) dinormalkan DI SINI supaya cabang di bawah cukup
