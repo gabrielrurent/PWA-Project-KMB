@@ -17,11 +17,12 @@
     :root{
       --bg:#F8FAFC;--bg-secondary:#F3F4F6;--card:#FFFFFF;--border:#E5E7EB;
       --text:#111827;--text-secondary:#6B7280;--text-disabled:#9CA3AF;
-      --primary:#4F633F;--primary-hover:#46593A;--primary-soft:#F1F4EE;
+      --primary:#4F633F;--primary-hover:#384B2B;--primary-active:#223215;
+      --primary-soft:#EEFEDA;--primary-container:#D2E9BB;
       --success:#10B981;--warning:#F59E0B;--error:#EF4444;
       --input-border:#D1D5DB;--radius:16px;--radius-sm:10px;
       --shadow:0 4px 12px rgba(0,0,0,.05);--shadow-hover:0 8px 24px rgba(0,0,0,.08);
-      --focus-ring:0 0 0 3px rgba(37,99,235,.25);
+      --focus-ring:0 0 0 3px rgba(79,99,63,.25);
     }
     *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
     body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
@@ -42,7 +43,7 @@
     .err{border-color:#FECACA;background:#FEF2F2;font-size:12px;color:#DC2626}
     .big{display:block;width:100%;margin-top:10px;padding:13px;font-size:15px;font-weight:700;color:#fff;background:var(--primary);border:0;border-radius:var(--radius-sm);cursor:pointer}
     .big:hover{background:var(--primary-hover)}
-    .big:active{transform:scale(0.98)}
+    .big:active{background:var(--primary-active);transform:scale(0.98)}
     .big.danger{background:var(--error);color:#fff}
     .big.secondary{background:var(--card);color:var(--text);border:1px solid var(--border)}
     .mini{padding:6px 11px;font-size:12px;border:0;border-radius:8px;background:var(--primary);color:#fff;font-weight:700;margin-top:5px;cursor:pointer}
@@ -116,12 +117,12 @@
        jejak baris mana yang sedang dia kerjakan — timer, tombol, dan nomor WO
        tiap baris jadi terlihat menyatu. Tiap baris diberi kotak sendiri. */
     .grupHead{background:var(--primary-soft);border:1px solid var(--border);
-              border-left:4px solid #0f766e;border-radius:var(--radius-sm);padding:11px 12px;margin-bottom:10px}
+              border-left:4px solid var(--primary);border-radius:var(--radius-sm);padding:11px 12px;margin-bottom:10px}
     .woLine{background:var(--bg-secondary);border:1px solid var(--border);
             border-radius:var(--radius-sm);padding:12px;margin-bottom:10px}
     .woLine:last-of-type{margin-bottom:12px}
     .woLineNo{display:inline-flex;align-items:center;justify-content:center;
-              min-width:22px;height:22px;border-radius:6px;background:#0f766e;color:#fff;
+              min-width:22px;height:22px;border-radius:6px;background:var(--primary);color:#fff;
               font-size:11px;font-weight:800;margin-right:7px;flex-shrink:0}
     /* ── BADGE & INFO WO ─────────────────────────────────────────────────────
        cardTop memakai space-between, jadi badge terlempar ke tepi dan L1
@@ -208,7 +209,7 @@
     #screen-login.loginBg{
       position:fixed;top:0;left:0;right:0;bottom:0;max-width:none;margin:0;padding:20px 0;
       display:flex;align-items:center;justify-content:center;overflow-y:auto;z-index:20;
-      background:linear-gradient(160deg,#0b1b33 0%,#14346b 45%,#3E4F32 100%);
+      background:linear-gradient(160deg,#0F1F04 0%,#223215 45%,#4F633F 100%);
     }
     /* margin:auto pada anak flex = benar-benar di tengah, dan tetap bisa di-scroll
        bila layar pendek / keyboard HP terbuka (tidak terpotong di atas). */
@@ -224,11 +225,11 @@
     .loginBrand p{color:rgba(255,255,255,.85);font-size:12px;margin-top:2px;text-shadow:0 1px 6px rgba(0,0,0,.5)}
     @media(max-height:640px){ .loginBrand img{width:52px;height:52px} .loginBrand h1{font-size:17px} }
     /* Spinner kecil — dipakai layar login & tombol Sync (port SUM V2) */
-    .spin{display:inline-block;width:13px;height:13px;border:2px solid #C8D4BC;border-top-color:#3E4F32;border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px;margin-right:5px}
+    .spin{display:inline-block;width:13px;height:13px;border:2px solid var(--primary-container);border-top-color:var(--primary);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px;margin-right:5px}
     @keyframes sp{to{transform:rotate(360deg)}}
     /* LIVE TIMER (port 1:1 dari SUM V2) */
-    .timerPill{background:#F1F4EE;border:1px solid #C8D4BC;border-radius:var(--radius-sm);padding:10px;text-align:center;margin:10px 0}
-    .timerClock{font-size:24px;font-weight:800;font-family:monospace;color:#3E4F32}
+    .timerPill{background:var(--primary-soft);border:1px solid var(--primary-container);border-radius:var(--radius-sm);padding:10px;text-align:center;margin:10px 0}
+    .timerClock{font-size:24px;font-weight:800;font-family:monospace;color:var(--primary-active)}
     .timerBtns{display:flex;gap:6px;justify-content:center;margin-top:8px;flex-wrap:wrap}
     .timerBtn{padding:7px 14px;border-radius:8px;font-weight:700;font-size:13px;border:none;cursor:pointer}
     .btnStart{background:#10b981;color:#fff}
