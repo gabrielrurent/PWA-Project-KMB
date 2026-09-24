@@ -18,7 +18,7 @@ var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbxh4086qGRZGDqA
 // service worker yang benar-benar aktif (lihat syncVersionFromCache).
 // Dengan begitu rilis cukup mengubah CACHE di sw.js; angka di sini tak bisa lagi
 // tertinggal diam-diam seperti dulu (APP_VERSION v26 vs CACHE v34).
-var APP_VERSION = 'projek-v2'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'projek-v3'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 
 // ── Pembaruan versi otomatis ────────────────────────────────────────────────
 // sw.js sudah skipWaiting()+clients.claim(), jadi versi baru mengambil alih
@@ -1142,7 +1142,7 @@ function openCreateForm() {
   var secs = S.refs.sections || [];
   var secHtml = '';
   for (var si=0;si<secs.length;si++) {
-    var icons = {tyreman:'🛢️',field:'🚜',workshop:'🏭'};
+    var icons = {vessel:'🚢',maintenance:'🔧',workshop:'🏭',tyreman:'🚢',field:'🔧'};
     secHtml += '<label class="secOpt"><input type="radio" name="cSec" value="'+secs[si]+'"'+(si===0?' checked':'')+'>'+
                '<span class="secCard">'+(icons[secs[si]]||'')+' '+secs[si]+'</span></label>';
   }
@@ -1194,7 +1194,7 @@ function updateCreatePreview(){
     ph=parseFloat(document.getElementById('cOthersTh').value)||0;
     uf=parseFloat(document.getElementById('cOthersUf').value)||0;
     name=document.getElementById('cOthersDesc').value||'Others';
-  } else if (sec==='tyreman') {
+  } else if (sec==='vessel') {
     var cv=document.getElementById('cComp').value;
     var comps=(S.refs&&S.refs.components)||[];
     for(var i=0;i<comps.length;i++){ if(String(comps[i].component_no)===cv){ bp=parseFloat(comps[i].base_points)||0; ph=parseFloat(comps[i].target_hours)||0; name=comps[i].component_name; break; } }
@@ -1202,7 +1202,7 @@ function updateCreatePreview(){
   } else {
     var js=document.getElementById('cCasJob'); var opt=js.options[js.selectedIndex];
     if(opt&&opt.value){ bp=parseFloat(opt.getAttribute('data-bp'))||0; ph=parseFloat(opt.getAttribute('data-ph'))||0; name=opt.textContent; }
-    if(sec==='field'){ var uv=document.getElementById('cUnit').value; var units=(S.refs&&S.refs.units)||[]; for(var u=0;u<units.length;u++){ if(String(units[u].unit_id)===uv){ uf=parseFloat(units[u].unit_factor)||1.0; break; } } }
+    if(sec==='maintenance'){ var uv=document.getElementById('cUnit').value; var units=(S.refs&&S.refs.units)||[]; for(var u=0;u<units.length;u++){ if(String(units[u].unit_id)===uv){ uf=parseFloat(units[u].unit_factor)||1.0; break; } } }
     else uf=1.0; // workshop placeholder
   }
   if (bp===null && ph===null) { box.style.display='none'; return; }
@@ -1225,7 +1225,7 @@ function onPwaOthersToggle() {
 }
 function onCreateSectionChange() {
   var sec = getCreateSection();
-  var isTyre = (sec === 'tyreman');
+  var isTyre = (sec === 'vessel');
   var isWs = (sec === 'workshop');
   // reset Others state
   document.getElementById('cOthersWrap').style.display = 'none';
@@ -1273,7 +1273,7 @@ function onCreateSectionChange() {
  * di sisi lain. Mencampurnya berarti dua satuan dijumlahkan jadi satu angka.
  */
 function meterCreate() {
-  if (getCreateSection() === 'tyreman') {
+  if (getCreateSection() === 'vessel') {
     return {jenis:'km', label:'KM', kunci:'kilometers', contoh:'cth: 84200'};
   }
   return {jenis:'hm', label:'HM', kunci:'hour_meter', contoh:'cth: 12450'};
@@ -1316,9 +1316,24 @@ function setelMeterCreate() {
   }
 }
 
+/* Nama cluster tenant ini: vessel, maintenance, workshop. Nama lama
+   (tyreman/tyre, field) dinormalkan DI SINI supaya cabang di bawah cukup
+   mengenal satu set nama - 1:1 dengan WorkOrder.html baris 460-461 dan
+   normalisasi di Auth.gs, ConfigService.gs, JobCatalogService.gs.
+
+   Ini satu-satunya pintu nilai section di layar Buat WO. Kalau GAS menambah
+   atau mengganti cluster lagi, ubah di sini juga - PWA tidak bisa membaca
+   Constants.gs, jadi kesejajarannya dijaga dengan tangan. */
+function secBaku(s) {
+  s = String(s || '').toLowerCase().replace(/^\s+|\s+$/g, '');
+  if (s === 'field') return 'maintenance';
+  if (s === 'tyreman' || s === 'tyre') return 'vessel';
+  return s;
+}
+
 function getCreateSection() {
   var r = document.querySelector('input[name="cSec"]:checked');
-  return r ? r.value : 'tyreman';
+  return secBaku(r ? r.value : 'vessel');
 }
 /**
  * Isi sebuah dropdown unit dengan URUTAN yang masuk akal di lapangan.
@@ -1425,7 +1440,7 @@ function cekUnitOthers(sel) {
 }
 
 function populateTyreUnits() {
-  isiDropdownUnit(document.getElementById('cTyreUnit'), S.refs.units || [], 'tyreman', '', false);
+  isiDropdownUnit(document.getElementById('cTyreUnit'), S.refs.units || [], 'vessel', '', false);
 }
 
 /** Dipanggil saat unit tyreman dipilih — tangkap unit ber-scope 'others'. */
@@ -1442,7 +1457,7 @@ function _nm(v) { return String(v == null ? '' : v).toLowerCase().trim(); }
 
 function populateCascadeRoot(sec) {
   var jobs = (sec==='workshop') ? (S.refs.jobs_workshop||[]) : (S.refs.jobs_field||[]);
-  if (sec === 'field') {
+  if (sec === 'maintenance') {
     var validModels = {};
     for (var j=0;j<jobs.length;j++) validModels[_nm(jobs[j].unit_model)] = true;
     // Hanya unit yang modelnya punya job di katalog — saringan lama, tetap.
@@ -1454,7 +1469,7 @@ function populateCascadeRoot(sec) {
       var um = _nm(u.unit_model);
       return um && validModels[um];
     });
-    isiDropdownUnit(document.getElementById('cUnit'), layak, 'field', '', true);
+    isiDropdownUnit(document.getElementById('cUnit'), layak, 'maintenance', '', true);
   } else {
     var models = {}; for (var mj=0;mj<jobs.length;mj++) models[_nm(jobs[mj].unit_model)]=true;
     var mSel = document.getElementById('cModel');
@@ -1858,7 +1873,7 @@ function _bacaBarisCreate() {
     payload.others_target_hours = oth;
     payload.others_unit_factor = ouf;
     label = 'Others — ' + odesc;
-  } else if (sec === 'tyreman') {
+  } else if (sec === 'vessel') {
     var compSel = document.getElementById('cComp');
     var unitSel = document.getElementById('cTyreUnit');
     var comp = compSel.value, unit = unitSel.value;
@@ -1871,7 +1886,7 @@ function _bacaBarisCreate() {
     if (!jobSel.value) return {payload:null, label:'', err:'Pilih job dari katalog'};
     payload.job_id = jobSel.value;
     label = _teksOpsi(jobSel);
-    if (sec === 'field') {
+    if (sec === 'maintenance') {
       var fUnitSel = document.getElementById('cUnit');
       if (!fUnitSel.value) return {payload:null, label:'', err:'Pilih unit'};
       payload.unit_id = fUnitSel.value;
