@@ -18,7 +18,7 @@ var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbxh4086qGRZGDqA
 // service worker yang benar-benar aktif (lihat syncVersionFromCache).
 // Dengan begitu rilis cukup mengubah CACHE di sw.js; angka di sini tak bisa lagi
 // tertinggal diam-diam seperti dulu (APP_VERSION v26 vs CACHE v34).
-var APP_VERSION = 'projek-v7'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'projek-v8'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 
 // ── Pembaruan versi otomatis ────────────────────────────────────────────────
 // sw.js sudah skipWaiting()+clients.claim(), jadi versi baru mengambil alih
@@ -1193,15 +1193,10 @@ function updateCreatePreview(){
     ph=parseFloat(document.getElementById('cOthersTh').value)||0;
     uf=parseFloat(document.getElementById('cOthersUf').value)||0;
     name=document.getElementById('cOthersDesc').value||'Others';
-  } else if (sec==='vessel') {
-    var cv=document.getElementById('cComp').value;
-    var comps=(S.refs&&S.refs.components)||[];
-    for(var i=0;i<comps.length;i++){ if(String(comps[i].component_no)===cv){ bp=parseFloat(comps[i].base_points)||0; ph=parseFloat(comps[i].target_hours)||0; name=comps[i].component_name; break; } }
-    uf=1.0;
   } else {
     var js=document.getElementById('cCasJob'); var opt=js.options[js.selectedIndex];
     if(opt&&opt.value){ bp=parseFloat(opt.getAttribute('data-bp'))||0; ph=parseFloat(opt.getAttribute('data-ph'))||0; name=opt.textContent; }
-    if(sec==='maintenance'){ var uv=document.getElementById('cUnit').value; var units=(S.refs&&S.refs.units)||[]; for(var u=0;u<units.length;u++){ if(String(units[u].unit_id)===uv){ uf=parseFloat(units[u].unit_factor)||1.0; break; } } }
+    if(sec==='maintenance'||sec==='vessel'){ var uv=document.getElementById('cUnit').value; var units=(S.refs&&S.refs.units)||[]; for(var u=0;u<units.length;u++){ if(String(units[u].unit_id)===uv){ uf=parseFloat(units[u].unit_factor)||1.0; break; } } }
     else uf=1.0; // workshop placeholder
   }
   if (bp===null && ph===null) { box.style.display='none'; return; }
@@ -1224,7 +1219,16 @@ function onPwaOthersToggle() {
 }
 function onCreateSectionChange() {
   var sec = getCreateSection();
-  var isTyre = (sec === 'vessel');
+  /* Jalur tyreman lama - satu dropdown datar berisi seluruh komponen - sudah
+     pensiun. Rekondisi kini memakai cascade yang sama dengan Maintenance,
+     1:1 dengan WorkOrder.html: di sana populateCascadeRoot dipanggil untuk
+     maintenance DAN vessel, dan grupBolehUntuk() berbunyi
+     'vessel || maintenance'.
+
+     Elemen cTyreGroup sengaja DIBIARKAN di DOM, hanya tidak pernah
+     ditampilkan lagi. Membuangnya membuat perubahan ini jauh lebih besar dan
+     lebih sulit dibalik kalau ternyata ada yang terlewat. */
+  var isTyre = false;
   var isWs = (sec === 'workshop');
   // reset Others state
   document.getElementById('cOthersWrap').style.display = 'none';
@@ -1468,8 +1472,10 @@ function onPilihUnitTyre() { cekUnitOthers(document.getElementById('cTyreUnit'))
 function _nm(v) { return String(v == null ? '' : v).toLowerCase().trim(); }
 
 function populateCascadeRoot(sec) {
-  var jobs = (sec==='workshop') ? (S.refs.jobs_workshop||[]) : (S.refs.jobs_field||[]);
-  if (sec === 'maintenance') {
+  var jobs = (sec==='workshop') ? (S.refs.jobs_workshop||[])
+           : (sec==='vessel')   ? (S.refs.jobs_vessel||[])
+           :                      (S.refs.jobs_field||[]);
+  if (sec === 'maintenance' || sec === 'vessel') {
     var validModels = {};
     for (var j=0;j<jobs.length;j++) validModels[_nm(jobs[j].unit_model)] = true;
     // Hanya unit yang modelnya punya job di katalog — saringan lama, tetap.
@@ -1481,7 +1487,7 @@ function populateCascadeRoot(sec) {
       var um = _nm(u.unit_model);
       return um && validModels[um];
     });
-    isiDropdownUnit(document.getElementById('cUnit'), layak, 'maintenance', '', true);
+    isiDropdownUnit(document.getElementById('cUnit'), layak, sec, '', true);
   } else {
     var models = {}; for (var mj=0;mj<jobs.length;mj++) models[_nm(jobs[mj].unit_model)]=true;
     var mSel = document.getElementById('cModel');
@@ -1497,7 +1503,9 @@ function onCasUnitOrModel() {
   // dibangun, kalau tidak cascade akan mencari model dari unit yang tak punya.
   if (cekUnitOthers(document.getElementById('cUnit'))) return;
   var sec = getCreateSection();
-  var jobs = (sec==='workshop') ? (S.refs.jobs_workshop||[]) : (S.refs.jobs_field||[]);
+  var jobs = (sec==='workshop') ? (S.refs.jobs_workshop||[])
+           : (sec==='vessel')   ? (S.refs.jobs_vessel||[])
+           :                      (S.refs.jobs_field||[]);
   var model = '';
   if (sec==='workshop') { model = document.getElementById('cModel').value; }
   else { var opt = document.getElementById('cUnit').options[document.getElementById('cUnit').selectedIndex]; model = opt ? (opt.getAttribute('data-model')||'') : ''; }
@@ -1545,7 +1553,9 @@ function _jobTakCocok() {
 
 function onCasComp() {
   var sec = getCreateSection();
-  var jobs = (sec==='workshop') ? (S.refs.jobs_workshop||[]) : (S.refs.jobs_field||[]);
+  var jobs = (sec==='workshop') ? (S.refs.jobs_workshop||[])
+           : (sec==='vessel')   ? (S.refs.jobs_vessel||[])
+           :                      (S.refs.jobs_field||[]);
   var model = sec==='workshop' ? document.getElementById('cModel').value : (document.getElementById('cUnit').options[document.getElementById('cUnit').selectedIndex]||{}).getAttribute('data-model')||'';
   var comp = document.getElementById('cCasComp').value;
   var subs = {};
@@ -1558,7 +1568,9 @@ function onCasComp() {
 }
 function onCasSub() {
   var sec = getCreateSection();
-  var jobs = (sec==='workshop') ? (S.refs.jobs_workshop||[]) : (S.refs.jobs_field||[]);
+  var jobs = (sec==='workshop') ? (S.refs.jobs_workshop||[])
+           : (sec==='vessel')   ? (S.refs.jobs_vessel||[])
+           :                      (S.refs.jobs_field||[]);
   var model = sec==='workshop' ? document.getElementById('cModel').value : (document.getElementById('cUnit').options[document.getElementById('cUnit').selectedIndex]||{}).getAttribute('data-model')||'';
   var comp = document.getElementById('cCasComp').value;
   var sub = document.getElementById('cCasSub').value;
@@ -1885,20 +1897,12 @@ function _bacaBarisCreate() {
     payload.others_target_hours = oth;
     payload.others_unit_factor = ouf;
     label = 'Others — ' + odesc;
-  } else if (sec === 'vessel') {
-    var compSel = document.getElementById('cComp');
-    var unitSel = document.getElementById('cTyreUnit');
-    var comp = compSel.value, unit = unitSel.value;
-    if (!comp) return {payload:null, label:'', err:'Pilih joblist mekanik'};
-    if (!unit) return {payload:null, label:'', err:'Pilih unit'};
-    payload.component_id = comp; payload.unit_id = unit;
-    label = _teksOpsi(compSel) + ' @ ' + _teksOpsi(unitSel);
   } else {
     var jobSel = document.getElementById('cCasJob');
     if (!jobSel.value) return {payload:null, label:'', err:'Pilih job dari katalog'};
     payload.job_id = jobSel.value;
     label = _teksOpsi(jobSel);
-    if (sec === 'maintenance') {
+    if (sec === 'maintenance' || sec === 'vessel') {
       var fUnitSel = document.getElementById('cUnit');
       if (!fUnitSel.value) return {payload:null, label:'', err:'Pilih unit'};
       payload.unit_id = fUnitSel.value;
