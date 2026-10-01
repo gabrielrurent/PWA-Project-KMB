@@ -679,7 +679,7 @@ function syncNow(manual) {
       // Sync otomatis tetap patuh TTL supaya tidak boros kuota.
       var perluRefs = manual || refsStale();
       var tasks = [];
-      if (S.role === 'mechanic') { tasks.push(pullWos()); if (perluRefs) tasks.push(pullRefs()); }
+      if (S.role === 'mechanic') { tasks.push(pullWos()); }
       else {
         tasks.push(pullPending()); tasks.push(pullActive()); tasks.push(pullTransfers()); tasks.push(pullMonitoring());
         // Daftar approved ikut disegarkan saat Refresh DITEKAN — kalau tidak,
@@ -1008,7 +1008,11 @@ function doLogout() {
 }
 
 /* ── Tab ── */
-function switchTab(tab) { S.tab = tab; renderAll(); }
+function switchTab(tab) {
+  if (tab === 'create' && S.role === 'mechanic') return;
+  S.tab = tab;
+  renderAll();
+}
 
 /* ── M1: Submit form ── */
 var activeWo = null;
@@ -1128,6 +1132,10 @@ function kirimLangsung(woId) {
 
 /* ── M2: Create WO form ── */
 function openCreateForm() {
+  if (S.role === 'mechanic') {
+    toast('⚠️ Mekanik tidak memiliki akses untuk membuat WO');
+    return;
+  }
   if (!S.refs) {
     if (navigator.onLine) {
       toast('⏳ Memuat data referensi...');
@@ -1849,6 +1857,10 @@ function renderGrupBaris() {
  * "1 baris gagal".
  */
 function simpanGrup() {
+  if (S.role === 'mechanic') {
+    toast('⚠️ Mekanik tidak memiliki akses untuk membuat WO');
+    return;
+  }
   if (!_grupBaris.length) { toast('Belum ada baris di daftar'); return; }
   var gid = 'GRP-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
   var tugas = _grupBaris.map(function(b) {
@@ -1941,6 +1953,10 @@ function _teksOpsi(sel) {
 }
 
 function queueCreate(keepOpen) {
+  if (S.role === 'mechanic') {
+    toast('⚠️ Mekanik tidak memiliki akses untuk membuat WO');
+    return;
+  }
   var d = _bacaBarisCreate();
   if (d.err) { toast(d.err); return; }
   var payload = d.payload;
@@ -2614,18 +2630,15 @@ function renderAll() {
   document.getElementById('lastSync').textContent=(S.lastSync?'Sync: '+new Date(S.lastSync).toLocaleString('id-ID'):'Belum sync')+' · '+APP_VERSION;
   document.getElementById('meName').textContent=S.me?(S.me.name||S.me.mechanic_id):'';
   // tabs
-  // Sejak 3 Agu 2026 mekanik juga boleh membuat WO, jadi tab bar tampil untuk
-  // SEMUA peran. Yang membedakan tinggal isi tabnya.
   var isApprover = S.role!=='mechanic';
-  // L1/L2 (approver): sembunyikan tab "WO Saya" — hanya Buat WO + Approval
+  // L1/L2 (approver): sembunyikan tab "WO Saya" — hanya Buat WO + Approval + Monitoring
   if (isApprover && S.tab==='wos') S.tab='approval';
-  document.getElementById('tabBar').style.display = 'flex';
+  // Mekanik: tidak bisa membuat WO — hanya WO Saya
+  if (!isApprover && (S.tab==='approval' || S.tab==='monitor' || S.tab==='create')) S.tab='wos';
+  document.getElementById('tabBar').style.display = isApprover ? 'flex' : 'none';
   document.getElementById('tabWos').style.display = isApprover ? 'none' : '';
-  // Mekanik hanya WO Saya + Buat WO. Approval & Monitoring tetap milik approver;
-  // kalau tab tersimpan dari sesi sebelumnya, kembalikan supaya tak terdampar
-  // di layar kosong.
-  if (!isApprover && (S.tab==='approval' || S.tab==='monitor')) S.tab='wos';
   document.getElementById('tabWos').className = 'tab'+(S.tab==='wos'?' active':'');
+  document.getElementById('tabCreate').style.display = isApprover ? '' : 'none';
   document.getElementById('tabCreate').className = 'tab'+(S.tab==='create'?' active':'');
   document.getElementById('tabApproval').style.display = isApprover ? '' : 'none';
   document.getElementById('tabApproval').className = 'tab'+(S.tab==='approval'?' active':'');
@@ -2984,6 +2997,10 @@ function timKerjaStr(team) {
 }
 
 function renderCreateTab(el) {
+  if (S.role === 'mechanic') {
+    el.innerHTML = '<div class="empty">Mekanik tidak memiliki akses untuk membuat WO.</div>';
+    return;
+  }
   if (!S.refs) { el.innerHTML='<div class="empty">Tekan 🔄 Refresh untuk memuat data referensi.</div>'; return; }
   el.innerHTML='<button class="big" onclick="openCreateForm()" style="margin-bottom:12px">➕ Buat Work Order Baru</button>'+
     '<div class="sub">Data referensi: '+(S.refs.jobs_field||[]).length+' job field, '+(S.refs.jobs_workshop||[]).length+' job WS, '+(S.refs.components||[]).length+' komponen rekondisi</div>';
