@@ -18,7 +18,7 @@ var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbxh4086qGRZGDqA
 // service worker yang benar-benar aktif (lihat syncVersionFromCache).
 // Dengan begitu rilis cukup mengubah CACHE di sw.js; angka di sini tak bisa lagi
 // tertinggal diam-diam seperti dulu (APP_VERSION v26 vs CACHE v34).
-var APP_VERSION = 'projek-v10'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'projek-v11'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 
 // ── Pembaruan versi otomatis ────────────────────────────────────────────────
 // sw.js sudah skipWaiting()+clients.claim(), jadi versi baru mengambil alih
@@ -556,7 +556,15 @@ function showSendProgress(idx, total, op) {
 function api(action,data,opId) {
   var body = JSON.stringify({token:S.token, action:action, data:data||{}, op_id:opId||undefined});
   return fetch(CONFIG.API_URL, {method:'POST', headers:{'Content-Type':'text/plain'}, body:body})
-    .then(function(r){return r.json();});
+    .then(function(r){
+      return r.text().then(function(txt) {
+        try {
+          return JSON.parse(txt);
+        } catch(e) {
+          return { success: false, error: txt ? txt.slice(0, 150) : ('HTTP ' + r.status) };
+        }
+      });
+    });
 }
 
 /* ── Install PWA: tombol 1-tap via beforeinstallprompt ── */
@@ -3514,134 +3522,191 @@ function updateBulkRiskBanner() {
   banner.innerHTML = msgs.join('<br style="margin-bottom:4px">');
 }
 
+var bulkActiveOps = [];
+
 function startBulkApprovalQueue() {
   closeModal('bulkConfirmModal');
-  if (!navigator.onLine) {
-    toast('⚠️ Perlu koneksi internet untuk memproses bulk approval real-time');
-    return;
-  }
   var keys = Object.keys(selectedWoMap);
   if (keys.length === 0) return;
-
-  var queue = [];
-  keys.forEach(function(id) { queue.push(selectedWoMap[id]); });
 
   var globalNotes = (document.getElementById('bulkGlobalNotes') || {}).value || '';
   globalNotes = globalNotes.trim();
 
+  // 1. Buat seluruh OP keputusan dan simpan seketika ke Outbox IndexedDB PWA
+  var ops = [];
+  keys.forEach(function(id) {
+    var item = selectedWoMap[id];
+    var level = (item.status === 'pending_superintendent') ? 2 : 1;
+    var action = (level === 2) ? 'approve_l2' : 'approve_l1';
+    var op = {
+      op_id: uuid(),
+      seq: (_enqSeq++),
+      action: action,
+      wo_id: item.id,
+      wo_number: item.wo_number || item.id,
+      payload: {
+        wo_id: item.id,
+        safety_incident: !!item.safety_incident,
+        mtbf_status: (item.mtbf_redo_status === 'redo') ? 'redo' : 'first_time',
+        notes: globalNotes || 'Bulk approval antrean'
+      },
+      status: 'queued',
+      created_at: new Date().toISOString(),
+      label: (level === 1 ? 'L1' : 'L2') + ' ' + (item.wo_number || item.id)
+    };
+    ops.push(op);
+  });
+
+  bulkActiveOps = ops;
   bulkRunning = true;
   bulkCancelled = false;
 
-  var progressModal = document.getElementById('bulkProgressModal');
-  var progressFill = document.getElementById('bulkProgressFill');
-  var statusText = document.getElementById('bulkProgressStatusText');
-  var logBox = document.getElementById('bulkLogBox');
-  var btnStop = document.getElementById('btnBulkStopQueue');
-  var btnDone = document.getElementById('btnBulkDoneClose');
+  // 2. Simpan semua op ke IndexedDB Outbox secara persisten
+  var chainSave = Promise.resolve();
+  ops.forEach(function(op) {
+    chainSave = chainSave.then(function() { return obPut(op); });
+  });
 
-  if (progressFill) progressFill.style.width = '0%';
-  if (statusText) statusText.textContent = 'Memulai proses... (0/' + queue.length + ')';
-  if (logBox) logBox.innerHTML = '';
-  if (btnStop) { btnStop.style.display = 'block'; btnStop.disabled = false; btnStop.textContent = '⏹ Hentikan Proses'; }
-  if (btnDone) btnDone.style.display = 'none';
-
-  showModal('bulkProgressModal');
-
-  var okCount = 0;
-  var failCount = 0;
-
-  function step(index) {
-    if (bulkCancelled) {
-      bulkRunning = false;
-      var unproc = queue.length - index;
-      if (statusText) statusText.textContent = 'Antrean dihentikan: ' + okCount + ' berhasil, ' + failCount + ' gagal, ' + unproc + ' belum diproses';
-      if (logBox) {
-        var stopNotice = document.createElement('div');
-        stopNotice.className = 'bulk-log-item fail';
-        stopNotice.innerHTML = '<span>⚠️ Antrean dihentikan oleh user</span><span>Sisa: ' + unproc + ' WO</span>';
-        logBox.appendChild(stopNotice);
-        logBox.scrollTop = logBox.scrollHeight;
-      }
-      if (btnStop) btnStop.style.display = 'none';
-      if (btnDone) btnDone.style.display = 'block';
-      updateBulkBarUI();
-      return;
-    }
-
-    if (index >= queue.length) {
-      bulkRunning = false;
-      if (progressFill) progressFill.style.width = '100%';
-      if (statusText) statusText.textContent = 'Selesai: ' + okCount + ' berhasil, ' + failCount + ' gagal';
-      if (btnStop) btnStop.style.display = 'none';
-      if (btnDone) btnDone.style.display = 'block';
-      toast('Batch approval selesai!');
-      updateBulkBarUI();
-      return;
-    }
-
-    var item = queue[index];
-    var pct = Math.round((index / queue.length) * 100);
-    if (progressFill) progressFill.style.width = pct + '%';
-    if (statusText) statusText.textContent = 'Memproses WO (' + (index + 1) + ' dari ' + queue.length + '): ' + (item.wo_number || item.id) + '…';
-
-    var logItem = document.createElement('div');
-    logItem.className = 'bulk-log-item running';
-    logItem.id = 'bulk_log_' + item.id;
-    logItem.innerHTML = '<span>⏳ ' + esc(item.wo_number || item.id) + '</span><span>Memproses…</span>';
-    if (logBox) {
-      logBox.appendChild(logItem);
-      logBox.scrollTop = logBox.scrollHeight;
-    }
-
-    var level = (item.status === 'pending_superintendent') ? 2 : 1;
-    var action = (level === 2) ? 'approve_l2' : 'approve_l1';
-    var opId = uuid();
-    var payload = {
-      op_id: opId,
-      wo_id: item.id,
-      action: action,
-      level: level,
-      notes: globalNotes || 'Bulk approval antrean',
-      safety_incident: !!item.safety_incident,
-      mtbf_status: (item.mtbf_redo_status === 'redo') ? 'redo' : 'first_time'
-    };
-
-    api(action, payload, opId).then(function(res) {
-      var el = document.getElementById('bulk_log_' + item.id);
-      if (res && res.success) {
-        okCount++;
-        if (el) {
-          el.className = 'bulk-log-item success';
-          el.innerHTML = '<span>✅ ' + esc(item.wo_number || item.id) + '</span><span>Berhasil disetujui ✓</span>';
-        }
-        _lepasDariAntrean(item.id);
-        _perbaruiStatusLokal({ action: action, wo_id: item.id, result: res.result });
-        delete selectedWoMap[item.id];
-      } else {
-        failCount++;
-        var err = (res && res.error) ? (typeof res.error === 'string' ? res.error : (res.error.message || JSON.stringify(res.error))) : 'Gagal';
-        if (el) {
-          el.className = 'bulk-log-item fail';
-          el.innerHTML = '<span>❌ ' + esc(item.wo_number || item.id) + '</span><span title="' + esc(err) + '">Gagal: ' + esc(err.substring(0, 35)) + '</span>';
-        }
-      }
-      if (progressFill) progressFill.style.width = Math.round(((index + 1) / queue.length) * 100) + '%';
-      updateBulkBarUI();
-      setTimeout(function() { step(index + 1); }, 300);
-    }).catch(function(err) {
-      failCount++;
-      var el = document.getElementById('bulk_log_' + item.id);
-      if (el) {
-        el.className = 'bulk-log-item fail';
-        el.innerHTML = '<span>❌ ' + esc(item.wo_number || item.id) + '</span><span>Koneksi terputus</span>';
-      }
-      if (progressFill) progressFill.style.width = Math.round(((index + 1) / queue.length) * 100) + '%';
-      updateBulkBarUI();
-      setTimeout(function() { step(index + 1); }, 300);
+  chainSave.then(refreshOutbox).then(function() {
+    // 3. Lepaskan SEMUA kartu dari tampilan antrean seketika
+    ops.forEach(function(op) {
+      _lepasDariAntrean(op.wo_id);
     });
-  }
+    clearSelectedWos();
+    renderAll();
 
-  step(0);
+    // 4. Daftarkan Background Sync peramban (Chrome / Edge / Android SW)
+    requestBgSync();
+
+    // 5. Buka Modal Progress Real-Time
+    var progressFill = document.getElementById('bulkProgressFill');
+    var statusText = document.getElementById('bulkProgressStatusText');
+    var logBox = document.getElementById('bulkLogBox');
+    var btnLeaveBg = document.getElementById('btnBulkLeaveBackground');
+    var btnStop = document.getElementById('btnBulkStopQueue');
+    var btnDone = document.getElementById('btnBulkDoneClose');
+
+    if (progressFill) progressFill.style.width = '0%';
+    if (statusText) statusText.textContent = 'Memulai proses outbox... (0/' + ops.length + ')';
+    if (logBox) logBox.innerHTML = '';
+    if (btnLeaveBg) btnLeaveBg.style.display = 'block';
+    if (btnStop) { btnStop.style.display = 'block'; btnStop.disabled = false; btnStop.textContent = '⏹ Batalkan Sisa'; }
+    if (btnDone) btnDone.style.display = 'none';
+
+    // Inisialisasi item log di modal
+    if (logBox) {
+      ops.forEach(function(op) {
+        var logItem = document.createElement('div');
+        logItem.className = 'bulk-log-item';
+        logItem.id = 'bulk_log_' + op.wo_id;
+        logItem.innerHTML = '<span>⏳ ' + esc(op.wo_number) + '</span><span>Menunggu giliran…</span>';
+        logBox.appendChild(logItem);
+      });
+    }
+
+    showModal('bulkProgressModal');
+
+    // 6. Jalankan eksekusi sekuensial
+    var okCount = 0;
+    var failCount = 0;
+
+    function step(index) {
+      if (bulkCancelled) {
+        bulkRunning = false;
+        var unprocOps = ops.slice(index);
+        // Hapus sisa yang belum terkirim dari Outbox agar tidak terkirim di background
+        var pDel = Promise.resolve();
+        unprocOps.forEach(function(uOp) {
+          pDel = pDel.then(function() { return obDel(uOp.op_id); });
+        });
+        pDel.then(refreshOutbox).then(function() {
+          if (statusText) statusText.textContent = 'Antrean dibatalkan: ' + okCount + ' berhasil, ' + unprocOps.length + ' dibatalkan';
+          if (logBox) {
+            var stopNotice = document.createElement('div');
+            stopNotice.className = 'bulk-log-item fail';
+            stopNotice.innerHTML = '<span>⚠️ Antrean dibatalkan</span><span>Sisa ' + unprocOps.length + ' WO dikembalikan</span>';
+            logBox.appendChild(stopNotice);
+            logBox.scrollTop = logBox.scrollHeight;
+          }
+          if (btnLeaveBg) btnLeaveBg.style.display = 'none';
+          if (btnStop) btnStop.style.display = 'none';
+          if (btnDone) btnDone.style.display = 'block';
+          renderAll();
+        });
+        return;
+      }
+
+      if (index >= ops.length) {
+        bulkRunning = false;
+        if (progressFill) progressFill.style.width = '100%';
+        if (statusText) statusText.textContent = 'Selesai: ' + okCount + ' berhasil, ' + failCount + ' gagal';
+        if (btnLeaveBg) btnLeaveBg.style.display = 'none';
+        if (btnStop) btnStop.style.display = 'none';
+        if (btnDone) btnDone.style.display = 'block';
+        toast('✅ Batch approval selesai!');
+        if (document.hidden) notifyLocal('✅ Bulk approval (' + okCount + '/' + ops.length + ') selesai disetujui');
+        refreshOutbox().then(renderAll);
+        return;
+      }
+
+      var op = ops[index];
+      var pct = Math.round((index / ops.length) * 100);
+      if (progressFill) progressFill.style.width = pct + '%';
+      if (statusText) statusText.textContent = 'Memproses WO (' + (index + 1) + ' dari ' + ops.length + '): ' + op.wo_number + '…';
+
+      var logItem = document.getElementById('bulk_log_' + op.wo_id);
+      if (logItem) {
+        logItem.className = 'bulk-log-item running';
+        logItem.innerHTML = '<span>⏳ ' + esc(op.wo_number) + '</span><span>Memproses ke server…</span>';
+        if (logBox) logBox.scrollTop = logItem.offsetTop - logBox.offsetTop;
+      }
+
+      api(op.action, op.payload, op.op_id).then(function(res) {
+        if (res && res.success) {
+          okCount++;
+          op.status = 'done';
+          op.result = res.result;
+          _perbaruiStatusLokal(op);
+          if (logItem) {
+            logItem.className = 'bulk-log-item success';
+            logItem.innerHTML = '<span>✅ ' + esc(op.wo_number) + '</span><span>Berhasil disetujui ✓</span>';
+          }
+        } else {
+          failCount++;
+          var err = (res && res.error) ? (typeof res.error === 'string' ? res.error : (res.error.message || JSON.stringify(res.error))) : 'Gagal';
+          op.status = 'failed';
+          op.error = err;
+          if (logItem) {
+            logItem.className = 'bulk-log-item fail';
+            logItem.innerHTML = '<span>❌ ' + esc(op.wo_number) + '</span><span title="' + esc(err) + '">Gagal: ' + esc(err.substring(0, 35)) + '</span>';
+          }
+        }
+        obPut(op).then(refreshOutbox);
+        if (progressFill) progressFill.style.width = Math.round(((index + 1) / ops.length) * 100) + '%';
+        setTimeout(function() { step(index + 1); }, 350);
+      }).catch(function(err) {
+        // JANGAN tandai gagal permanen! Status tetap queued di Outbox PWA.
+        // Chrome Background Sync / Service Worker akan otomatis melanjutkannya saat sinyal pulih.
+        op.status = 'queued';
+        obPut(op).then(refreshOutbox);
+        requestBgSync();
+        if (logItem) {
+          logItem.className = 'bulk-log-item running';
+          logItem.innerHTML = '<span>⏳ ' + esc(op.wo_number) + '</span><span style="color:#d97706">Sinyal terputus — aman di Outbox PWA</span>';
+        }
+        if (progressFill) progressFill.style.width = Math.round(((index + 1) / ops.length) * 100) + '%';
+        setTimeout(function() { step(index + 1); }, 500);
+      });
+    }
+
+    step(0);
+  });
+}
+
+function leaveBulkToBackground() {
+  closeModal('bulkProgressModal');
+  toast('📲 Berjalan di background. Anda bisa menutup aplikasi atau mengunci HP — PWA akan menyelesaikan antrean otomatis.');
+  syncNow(false);
 }
 
 function stopBulkQueue() {
@@ -3649,7 +3714,7 @@ function stopBulkQueue() {
   var btnStop = document.getElementById('btnBulkStopQueue');
   if (btnStop) {
     btnStop.disabled = true;
-    btnStop.textContent = '⏳ Menghentikan…';
+    btnStop.textContent = '⏳ Membatalkan…';
   }
 }
 

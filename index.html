@@ -879,12 +879,18 @@
   <div class="modal" id="bulkProgressModal">
     <div class="sheet" style="max-height:92vh;display:flex;flex-direction:column">
       <h2 style="margin-bottom:4px">⏳ Memproses Approve Massal</h2>
-      <div id="bulkProgressStatusText" style="font-weight:700;color:var(--text);font-size:13px;margin:6px 0">
-        Menyiapkan antrean...
+      
+      <!-- Banner Bisa Ditinggal di Background -->
+      <div style="background:#EFF6FF;border:1px solid #BFDBFE;color:#1E40AF;padding:8px 12px;border-radius:8px;font-size:12px;line-height:1.4;margin:6px 0 8px">
+        💡 <b>Bisa ditinggal:</b> Semua WO telah masuk antrean PWA (Outbox). Anda bisa menutup modal ini, berpindah aplikasi, atau mengunci HP — proses tetap berjalan di background secara otomatis.
+      </div>
+
+      <div id="bulkProgressStatusText" style="font-weight:700;color:var(--text);font-size:13px;margin:2px 0 6px">
+        Menyiapkan antrean outbox...
       </div>
 
       <!-- Progress Bar -->
-      <div style="width:100%;height:10px;background:var(--bg-secondary);border-radius:99px;overflow:hidden;margin:6px 0 10px;border:1px solid var(--border)">
+      <div style="width:100%;height:10px;background:var(--bg-secondary);border-radius:99px;overflow:hidden;margin:4px 0 10px;border:1px solid var(--border)">
         <div id="bulkProgressFill" style="height:100%;width:0%;background:linear-gradient(90deg,#F59E0B,#10B981);transition:width 0.3s ease;border-radius:99px"></div>
       </div>
 
@@ -892,17 +898,22 @@
       <div style="font-weight:700;font-size:11px;text-transform:uppercase;color:var(--text-secondary);margin-bottom:4px">
         Riwayat Eksekusi Real-time:
       </div>
-      <div id="bulkLogBox" class="bulk-log-box" style="flex:1;min-height:160px;max-height:260px;overflow-y:auto;margin-bottom:12px">
+      <div id="bulkLogBox" class="bulk-log-box" style="flex:1;min-height:160px;max-height:240px;overflow-y:auto;margin-bottom:12px">
         <!-- Log dinamis -->
       </div>
 
       <!-- Tombol Aksi Modal Progress -->
-      <div style="display:flex;gap:8px;margin-top:auto">
-        <button type="button" class="big danger" id="btnBulkStopQueue" onclick="stopBulkQueue()" style="margin:0">
-          ⏹ Hentikan Proses
-        </button>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:auto">
+        <div style="display:flex;gap:8px">
+          <button type="button" class="big secondary" id="btnBulkLeaveBackground" onclick="leaveBulkToBackground()" style="flex:1;margin:0;font-size:12.5px;padding:10px 6px">
+            📲 Jalankan di Background
+          </button>
+          <button type="button" class="big danger" id="btnBulkStopQueue" onclick="stopBulkQueue()" style="flex:1;margin:0;font-size:12.5px;padding:10px 6px">
+            ⏹ Batalkan Sisa
+          </button>
+        </div>
         <button type="button" class="big" id="btnBulkDoneClose" onclick="finishBulkApproval()" style="margin:0;display:none;background:#10b981">
-          ✓ Tutup &amp; Refresh Data
+          ✓ Selesai &amp; Refresh Data
         </button>
       </div>
     </div>
