@@ -18,7 +18,7 @@ var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbxh4086qGRZGDqA
 // service worker yang benar-benar aktif (lihat syncVersionFromCache).
 // Dengan begitu rilis cukup mengubah CACHE di sw.js; angka di sini tak bisa lagi
 // tertinggal diam-diam seperti dulu (APP_VERSION v26 vs CACHE v34).
-var APP_VERSION = 'projek-v12'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'projek-v13'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 
 // ── Pembaruan versi otomatis ────────────────────────────────────────────────
 // sw.js sudah skipWaiting()+clients.claim(), jadi versi baru mengambil alih
@@ -3966,53 +3966,61 @@ function renderPendingList(){
     var btnDetailText = isExpanded ? '🔼 Tutup Detail' : '👁️ Lihat Detail';
 
     html += '<div class="compact-wo-item' + (isSelected ? ' selected-wo-card' : '') + '" id="wo_card_' + esc(wid) + '" onclick="onCardClick(event, \'' + esc(wid) + '\')">' +
-      '<div class="compact-wo-row">' +
-        // Kolom 1: Identitas
-        '<div class="c-col">' +
-          '<div class="c-col-id-header">' +
-            '<label class="wo-chk-wrap" onclick="event.stopPropagation()" title="Pilih untuk Bulk Approve">' +
-              '<input type="checkbox" class="wo-select-chk" data-wo-id="' + esc(wid) + '" ' + (isSelected ? 'checked' : '') + ' onchange="onWoSelectChange(\'' + esc(wid) + '\', this.checked)">' +
-            '</label>' +
-            '<div>' +
-              '<span class="c-wo-num">' + esc(wo.wo_number || wid) + '</span>' +
-              '<div class="c-wo-time">' + esc(wo.created_at_str || '-') + '</div>' +
-            '</div>' +
+      // Header Bar: Checkbox + WO Info + Badges (Kiri), Semua Aksi (Kanan)
+      '<div class="compact-card-header">' +
+        '<div class="compact-header-left">' +
+          '<label class="wo-chk-wrap" onclick="event.stopPropagation()" title="Pilih untuk Bulk Approve">' +
+            '<input type="checkbox" class="wo-select-chk" data-wo-id="' + esc(wid) + '" ' + (isSelected ? 'checked' : '') + ' onchange="onWoSelectChange(\'' + esc(wid) + '\', this.checked)">' +
+          '</label>' +
+          '<div>' +
+            '<span class="c-wo-num">' + esc(wo.wo_number || wid) + '</span>' +
+            '<span class="c-wo-time" style="margin-left:6px">' + esc(wo.created_at_str || '-') + '</span>' +
           '</div>' +
-          '<div class="c-badges-wrap">' +
+          '<div class="c-badges-wrap" style="margin-left:4px">' +
             levelBadge +
             warningBadges.join('') +
           '</div>' +
         '</div>' +
 
-        // Kolom 2: Unit & Lokasi
-        '<div class="c-col">' +
-          '<div class="c-unit-title">🚜 ' + esc(wo.unit_name || wo.unit_id || '-') + '</div>' +
-          (wo.unit_name && wo.unit_id ? '<div class="c-sub-info">ID: ' + esc(wo.unit_id) + '</div>' : '') +
-          '<div>' + locBadge + '</div>' +
-        '</div>' +
-
-        // Kolom 3: Pekerjaan
-        '<div class="c-col">' +
-          '<div class="c-job-name" title="' + compName + '">' + compName + '</div>' +
-          '<div class="c-sub-info">Part: ' + partNum + '</div>' +
-          '<div style="font-size:11px;color:var(--text-secondary);font-weight:600">📁 ' + secName + '</div>' +
-        '</div>' +
-
-        // Kolom 4: Durasi & Tim
-        '<div class="c-col">' +
-          '<div class="c-duration-text">' + durText + '</div>' +
-          '<div style="display:flex;align-items:center;gap:4px">' + tlBadge + '</div>' +
-          '<div class="c-team-summary" title="' + teamSummary + '">👥 ' + teamSummary + '</div>' +
-        '</div>' +
-
-        // Kolom 5: Aksi Cepat
-        '<div class="compact-col-actions">' +
+        '<div class="compact-header-actions">' +
           '<button type="button" class="btn-detail-toggle" id="btn_detail_toggle_' + esc(wid) + '" onclick="event.stopPropagation(); toggleWoDetail(\'' + esc(wid) + '\')">' + btnDetailText + '</button>' +
           '<button type="button" class="btn-act-approve" onclick="event.stopPropagation(); openApproveForm(\'' + esc(wid) + '\')">✓ Approve</button>' +
           '<button type="button" class="btn-act-icon" title="Edit Override" onclick="event.stopPropagation(); quickEditWo(\'' + esc(wid) + '\')">✏️ Edit</button>' +
           '<button type="button" class="btn-act-icon" title="Kembalikan (Minta Revisi)" onclick="event.stopPropagation(); quickReturnWo(\'' + esc(wid) + '\', \'' + esc(wo.wo_number) + '\')">↩ Kembalikan</button>' +
           '<button type="button" class="btn-act-icon danger" title="Batalkan WO" onclick="event.stopPropagation(); openCancelForm(\'' + esc(wid) + '\', \'' + esc(wo.wo_number) + '\')">🚫 Batal</button>' +
           '<button type="button" class="btn-act-icon danger" title="Tolak WO" onclick="event.stopPropagation(); quickRejectWo(\'' + esc(wid) + '\', \'' + esc(wo.wo_number) + '\')">✗ Tolak</button>' +
+        '</div>' +
+      '</div>' +
+
+      // Body Grid: 4 Kolom Informasi Tertata
+      '<div class="compact-card-body">' +
+        // Kolom 1: Unit & Lokasi
+        '<div class="c-col">' +
+          '<div class="c-cell-k">🚜 UNIT & LOKASI</div>' +
+          '<div class="c-unit-title">' + esc(wo.unit_name || wo.unit_id || '-') + '</div>' +
+          (wo.unit_name && wo.unit_id ? '<div class="c-sub-info">ID: ' + esc(wo.unit_id) + '</div>' : '') +
+          '<div style="margin-top:2px">' + locBadge + '</div>' +
+        '</div>' +
+
+        // Kolom 2: Pekerjaan
+        '<div class="c-col">' +
+          '<div class="c-cell-k">📁 PEKERJAAN</div>' +
+          '<div class="c-job-name" title="' + compName + '">' + compName + '</div>' +
+          '<div class="c-sub-info">Part: ' + partNum + '</div>' +
+          '<div style="font-size:11px;color:var(--text-secondary);font-weight:600">' + secName + '</div>' +
+        '</div>' +
+
+        // Kolom 3: Durasi & Timeliness
+        '<div class="c-col">' +
+          '<div class="c-cell-k">⏱️ DURASI & TARGET</div>' +
+          '<div class="c-duration-text">' + durText + '</div>' +
+          '<div style="display:flex;align-items:center;gap:4px;margin-top:2px">' + tlBadge + '</div>' +
+        '</div>' +
+
+        // Kolom 4: Tim Mekanik
+        '<div class="c-col">' +
+          '<div class="c-cell-k">👥 TIM MEKANIK</div>' +
+          '<div class="c-team-summary" title="' + teamSummary + '">' + teamSummary + '</div>' +
         '</div>' +
       '</div>' +
 
