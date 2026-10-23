@@ -18,7 +18,7 @@ var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbxh4086qGRZGDqA
 // service worker yang benar-benar aktif (lihat syncVersionFromCache).
 // Dengan begitu rilis cukup mengubah CACHE di sw.js; angka di sini tak bisa lagi
 // tertinggal diam-diam seperti dulu (APP_VERSION v26 vs CACHE v34).
-var APP_VERSION = 'projek-v8'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'projek-v10'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 
 // ── Pembaruan versi otomatis ────────────────────────────────────────────────
 // sw.js sudah skipWaiting()+clients.claim(), jadi versi baru mengambil alih
@@ -2680,6 +2680,7 @@ function renderAll() {
   else if (S.tab==='approval') { renderApprovalTab(content); }
   else if (S.tab==='monitor') { renderMonitorTab(content); }
   else { renderWos(content); }   // 'wos' + jaring pengaman bila S.tab tak dikenal
+  if (typeof updateBulkBarUI === 'function') updateBulkBarUI();
 }
 
 /* ── MONITORING (approver) — cermin halaman Monitoring di web ──
@@ -3178,7 +3179,7 @@ function ketBar(wo, isL2) {
   }).join('') + '</div>';
 }
 
-function cancelBtn(wo){ return '<button class="big secondary" onclick="openCancelForm(\''+esc(String(wo.id))+'\',\''+esc(String(wo.wo_number))+'\')">🗑 Batalkan WO</button>'; }
+function cancelBtn(wo){ return '<button class="big secondary" onclick="event.stopPropagation(); openCancelForm(\''+esc(String(wo.id))+'\',\''+esc(String(wo.wo_number))+'\')">🗑 Batalkan WO</button>'; }
 /* ── TRANSFER WO: keputusan L1 (offline-capable) ── */
 function renderTransferList(){
   if (!S.transfers.length) return '<div class="empty">Tidak ada permintaan transfer dalam scope Anda.</div>';
@@ -3289,6 +3290,376 @@ function tahapSaya() {
   return null;
 }
 
+/* ── BULK APPROVAL (L1/L2) ── */
+var selectedWoMap = {};
+var bulkRunning = false;
+var bulkCancelled = false;
+
+function onWoSelectChange(woId, isChecked) {
+  var sid = String(woId);
+  var prevCount = Object.keys(selectedWoMap).length;
+  if (isChecked) {
+    var found = null;
+    for (var i = 0; i < (S.pending || []).length; i++) {
+      if (String(S.pending[i].id) === sid) { found = S.pending[i]; break; }
+    }
+    if (found) {
+      selectedWoMap[sid] = Object.assign({}, found, {
+        safety_incident: (found.safety_incident === true || String(found.safety_incident).toLowerCase() === 'true'),
+        mtbf_redo_status: (found.mtbf_redo_status === 'redo') ? 'redo' : 'first_time'
+      });
+      if (prevCount === 0) {
+        toast('Mode Multi-Pilih aktif: 1 WO dipilih');
+      }
+    }
+  } else {
+    delete selectedWoMap[sid];
+  }
+  _syncCardSelectionUI(sid, isChecked);
+  updateBulkBarUI();
+}
+
+function _syncCardSelectionUI(woId, isChecked) {
+  var card = document.getElementById('wo_card_' + woId);
+  if (card) {
+    if (isChecked) card.classList.add('selected-wo-card');
+    else card.classList.remove('selected-wo-card');
+    var chk = card.querySelector('.wo-select-chk');
+    if (chk) chk.checked = isChecked;
+  }
+}
+
+function onCardClick(e, woId) {
+  if (e.target.closest('button, select, input, textarea, a, .wo-chk-wrap')) return;
+  var isCurrentlySelected = !!selectedWoMap[String(woId)];
+  onWoSelectChange(woId, !isCurrentlySelected);
+}
+
+function toggleSelectAllPending() {
+  var _tahap = tahapSaya();
+  var OP_KEPUTUSAN = ['approve_l1','approve_l2','reject','approve_transfer','reject_transfer'];
+  var opMenunggu = {};
+  (S.outbox || []).forEach(function(o) {
+    if ((o.status === 'queued' || o.status === 'failed_retry') &&
+        o.wo_id && OP_KEPUTUSAN.indexOf(o.action) !== -1) opMenunggu[String(o.wo_id)] = true;
+  });
+  var milikSaya = _tahap ? S.pending.filter(function(wo){ return String(wo.status) === _tahap; }) : S.pending;
+  var daftar = milikSaya.filter(function(wo){ return !opMenunggu[String(wo.id)]; });
+  if (!daftar.length) return;
+
+  var allChecked = daftar.every(function(w){ return !!selectedWoMap[String(w.id)]; });
+  if (allChecked) {
+    selectedWoMap = {};
+    toast('Semua pilihan WO dibatalkan');
+  } else {
+    daftar.forEach(function(w){
+      selectedWoMap[String(w.id)] = Object.assign({}, w, {
+        safety_incident: (w.safety_incident === true || String(w.safety_incident).toLowerCase() === 'true'),
+        mtbf_redo_status: (w.mtbf_redo_status === 'redo') ? 'redo' : 'first_time'
+      });
+    });
+    toast(daftar.length + ' WO berhasil dipilih');
+  }
+  renderAll();
+}
+
+function clearSelectedWos() {
+  selectedWoMap = {};
+  updateBulkBarUI();
+  toast('Semua pilihan WO dibatalkan');
+  renderAll();
+}
+
+function updateBulkBarUI() {
+  var keys = Object.keys(selectedWoMap);
+  var count = keys.length;
+  var bar = document.getElementById('bulkFloatingBar');
+  var badge = document.getElementById('bulkSelectedBadge');
+  var countText = document.getElementById('bulkApproveCountText');
+  if (badge) badge.textContent = count + ' WO dipilih';
+  if (countText) countText.textContent = count;
+  if (bar) {
+    if (count > 0 && S.tab === 'approval' && (S.appSub === 'pending' || !S.appSub)) {
+      bar.classList.add('show');
+      bar.style.display = 'flex';
+    } else {
+      bar.classList.remove('show');
+      setTimeout(function() { if (!bar.classList.contains('show')) bar.style.display = 'none'; }, 280);
+    }
+  }
+  var btnSelAll = document.getElementById('btnSelectAllWo');
+  if (btnSelAll) {
+    var _tahap = tahapSaya();
+    var OP_KEPUTUSAN = ['approve_l1','approve_l2','reject','approve_transfer','reject_transfer'];
+    var opMenunggu = {};
+    (S.outbox || []).forEach(function(o) {
+      if ((o.status === 'queued' || o.status === 'failed_retry') &&
+          o.wo_id && OP_KEPUTUSAN.indexOf(o.action) !== -1) opMenunggu[String(o.wo_id)] = true;
+    });
+    var milikSaya = _tahap ? S.pending.filter(function(wo){ return String(wo.status) === _tahap; }) : S.pending;
+    var daftar = milikSaya.filter(function(wo){ return !opMenunggu[String(wo.id)]; });
+    var allChecked = daftar.length > 0 && count >= daftar.length && daftar.every(function(w){ return !!selectedWoMap[String(w.id)]; });
+    btnSelAll.textContent = allChecked ? '✖️ Batalkan Semua' : '☑️ Pilih Semua di Halaman Ini';
+    btnSelAll.className = 'mini ' + (allChecked ? '' : 'gray');
+  }
+}
+
+function openBulkApproveModal() {
+  var keys = Object.keys(selectedWoMap);
+  if (keys.length === 0) {
+    toast('Pilih minimal 1 WO untuk diapprove');
+    return;
+  }
+  var count = keys.length;
+  var tEl = document.getElementById('bulkConfirmTitle');
+  if (tEl) tEl.textContent = '✓ Konfirmasi Bulk Approval (' + count + ' WO)';
+  var dEl = document.getElementById('bulkConfirmDescCount');
+  if (dEl) dEl.textContent = count;
+  var cBtn = document.getElementById('bulkConfirmCountBtn');
+  if (cBtn) cBtn.textContent = count;
+  var notesInput = document.getElementById('bulkGlobalNotes');
+  if (notesInput) notesInput.value = '';
+
+  var tbody = document.getElementById('bulkTableBody');
+  if (tbody) {
+    var rowsHtml = '';
+    keys.forEach(function(id) {
+      var w = selectedWoMap[id];
+      var isL2 = w.status === 'pending_superintendent';
+      var isSafety = !!w.safety_incident;
+      var isRedo = (w.mtbf_redo_status === 'redo');
+      var rowClasses = [];
+      if (isSafety) rowClasses.push('has-safety');
+      if (isRedo) rowClasses.push('has-redo');
+
+      rowsHtml += '<tr id="bulk_row_' + esc(w.id) + '" class="' + rowClasses.join(' ') + '">' +
+        '<td>' +
+          '<div style="font-weight:700;color:var(--text)">' + esc(w.wo_number || w.id) + '</div>' +
+          '<div style="font-size:11px;color:var(--text-secondary)">' + esc(w.component_name || '-') + (w.unit_name ? ' · ' + esc(w.unit_name) : '') + '</div>' +
+        '</td>' +
+        '<td style="text-align:center">' +
+          '<span class="badge" style="background:' + (isL2 ? WARNA.l2 : WARNA.l1) + '">' + (isL2 ? 'L2' : 'L1') + '</span>' +
+        '</td>' +
+        '<td style="text-align:center">' +
+          '<label style="cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:2px" title="Menandai adanya insiden K3 (pada Level 2 akan memicu pinalti nilai poin = 0)">' +
+            '<input type="checkbox" style="width:18px;height:18px;accent-color:var(--error);cursor:pointer" ' + (isSafety ? 'checked' : '') + ' onchange="onBulkToggleSafety(\'' + esc(w.id) + '\', this.checked)">' +
+          '</label>' +
+        '</td>' +
+        '<td style="text-align:center">' +
+          '<label style="cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:2px" title="Menandai pekerjaan berulang / komplain garansi (menerapkan faktor pinalti MTBF)">' +
+            '<input type="checkbox" style="width:18px;height:18px;accent-color:var(--warning);cursor:pointer" ' + (isRedo ? 'checked' : '') + ' onchange="onBulkToggleRedo(\'' + esc(w.id) + '\', this.checked)">' +
+          '</label>' +
+        '</td>' +
+      '</tr>';
+    });
+    tbody.innerHTML = rowsHtml;
+  }
+  updateBulkRiskBanner();
+  showModal('bulkConfirmModal');
+}
+
+function onBulkToggleSafety(woId, checked) {
+  if (selectedWoMap[woId]) selectedWoMap[woId].safety_incident = checked;
+  var row = document.getElementById('bulk_row_' + woId);
+  if (row) {
+    if (checked) row.classList.add('has-safety');
+    else row.classList.remove('has-safety');
+  }
+  updateBulkRiskBanner();
+}
+
+function onBulkToggleRedo(woId, checked) {
+  if (selectedWoMap[woId]) selectedWoMap[woId].mtbf_redo_status = checked ? 'redo' : 'first_time';
+  var row = document.getElementById('bulk_row_' + woId);
+  if (row) {
+    if (checked) row.classList.add('has-redo');
+    else row.classList.remove('has-redo');
+  }
+  updateBulkRiskBanner();
+}
+
+function updateBulkRiskBanner() {
+  var banner = document.getElementById('bulkRiskBanner');
+  if (!banner) return;
+  var hasSafety = 0;
+  var hasRedo = 0;
+  for (var k in selectedWoMap) {
+    if (selectedWoMap[k].safety_incident) hasSafety++;
+    if (selectedWoMap[k].mtbf_redo_status === 'redo') hasRedo++;
+  }
+  if (hasSafety === 0 && hasRedo === 0) {
+    banner.style.display = 'none';
+    banner.innerHTML = '';
+    return;
+  }
+
+  var msgs = [];
+  if (hasSafety > 0) {
+    msgs.push('⚠️ <b>Perhatian:</b> Terdapat <b>' + hasSafety + ' WO</b> yang ditandai mengalami Safety Incident. Poin teknisi akan dinolkan pada approval akhir.');
+  }
+  if (hasRedo > 0) {
+    msgs.push('🔧 Terdapat <b>' + hasRedo + ' WO</b> yang ditandai REDO. Faktor pengurang MTBF akan diterapkan.');
+  }
+
+  banner.style.display = 'block';
+  if (hasSafety > 0) {
+    banner.style.background = '#FEF2F2';
+    banner.style.border = '1px solid #FCA5A5';
+    banner.style.color = '#991B1B';
+  } else {
+    banner.style.background = '#FFFBEB';
+    banner.style.border = '1px solid #FDE68A';
+    banner.style.color = '#92400E';
+  }
+  banner.innerHTML = msgs.join('<br style="margin-bottom:4px">');
+}
+
+function startBulkApprovalQueue() {
+  closeModal('bulkConfirmModal');
+  if (!navigator.onLine) {
+    toast('⚠️ Perlu koneksi internet untuk memproses bulk approval real-time');
+    return;
+  }
+  var keys = Object.keys(selectedWoMap);
+  if (keys.length === 0) return;
+
+  var queue = [];
+  keys.forEach(function(id) { queue.push(selectedWoMap[id]); });
+
+  var globalNotes = (document.getElementById('bulkGlobalNotes') || {}).value || '';
+  globalNotes = globalNotes.trim();
+
+  bulkRunning = true;
+  bulkCancelled = false;
+
+  var progressModal = document.getElementById('bulkProgressModal');
+  var progressFill = document.getElementById('bulkProgressFill');
+  var statusText = document.getElementById('bulkProgressStatusText');
+  var logBox = document.getElementById('bulkLogBox');
+  var btnStop = document.getElementById('btnBulkStopQueue');
+  var btnDone = document.getElementById('btnBulkDoneClose');
+
+  if (progressFill) progressFill.style.width = '0%';
+  if (statusText) statusText.textContent = 'Memulai proses... (0/' + queue.length + ')';
+  if (logBox) logBox.innerHTML = '';
+  if (btnStop) { btnStop.style.display = 'block'; btnStop.disabled = false; btnStop.textContent = '⏹ Hentikan Proses'; }
+  if (btnDone) btnDone.style.display = 'none';
+
+  showModal('bulkProgressModal');
+
+  var okCount = 0;
+  var failCount = 0;
+
+  function step(index) {
+    if (bulkCancelled) {
+      bulkRunning = false;
+      var unproc = queue.length - index;
+      if (statusText) statusText.textContent = 'Antrean dihentikan: ' + okCount + ' berhasil, ' + failCount + ' gagal, ' + unproc + ' belum diproses';
+      if (logBox) {
+        var stopNotice = document.createElement('div');
+        stopNotice.className = 'bulk-log-item fail';
+        stopNotice.innerHTML = '<span>⚠️ Antrean dihentikan oleh user</span><span>Sisa: ' + unproc + ' WO</span>';
+        logBox.appendChild(stopNotice);
+        logBox.scrollTop = logBox.scrollHeight;
+      }
+      if (btnStop) btnStop.style.display = 'none';
+      if (btnDone) btnDone.style.display = 'block';
+      updateBulkBarUI();
+      return;
+    }
+
+    if (index >= queue.length) {
+      bulkRunning = false;
+      if (progressFill) progressFill.style.width = '100%';
+      if (statusText) statusText.textContent = 'Selesai: ' + okCount + ' berhasil, ' + failCount + ' gagal';
+      if (btnStop) btnStop.style.display = 'none';
+      if (btnDone) btnDone.style.display = 'block';
+      toast('Batch approval selesai!');
+      updateBulkBarUI();
+      return;
+    }
+
+    var item = queue[index];
+    var pct = Math.round((index / queue.length) * 100);
+    if (progressFill) progressFill.style.width = pct + '%';
+    if (statusText) statusText.textContent = 'Memproses WO (' + (index + 1) + ' dari ' + queue.length + '): ' + (item.wo_number || item.id) + '…';
+
+    var logItem = document.createElement('div');
+    logItem.className = 'bulk-log-item running';
+    logItem.id = 'bulk_log_' + item.id;
+    logItem.innerHTML = '<span>⏳ ' + esc(item.wo_number || item.id) + '</span><span>Memproses…</span>';
+    if (logBox) {
+      logBox.appendChild(logItem);
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    var level = (item.status === 'pending_superintendent') ? 2 : 1;
+    var action = (level === 2) ? 'approve_l2' : 'approve_l1';
+    var opId = uuid();
+    var payload = {
+      op_id: opId,
+      wo_id: item.id,
+      action: action,
+      level: level,
+      notes: globalNotes || 'Bulk approval antrean',
+      safety_incident: !!item.safety_incident,
+      mtbf_status: (item.mtbf_redo_status === 'redo') ? 'redo' : 'first_time'
+    };
+
+    api(action, payload, opId).then(function(res) {
+      var el = document.getElementById('bulk_log_' + item.id);
+      if (res && res.success) {
+        okCount++;
+        if (el) {
+          el.className = 'bulk-log-item success';
+          el.innerHTML = '<span>✅ ' + esc(item.wo_number || item.id) + '</span><span>Berhasil disetujui ✓</span>';
+        }
+        _lepasDariAntrean(item.id);
+        _perbaruiStatusLokal({ action: action, wo_id: item.id, result: res.result });
+        delete selectedWoMap[item.id];
+      } else {
+        failCount++;
+        var err = (res && res.error) ? (typeof res.error === 'string' ? res.error : (res.error.message || JSON.stringify(res.error))) : 'Gagal';
+        if (el) {
+          el.className = 'bulk-log-item fail';
+          el.innerHTML = '<span>❌ ' + esc(item.wo_number || item.id) + '</span><span title="' + esc(err) + '">Gagal: ' + esc(err.substring(0, 35)) + '</span>';
+        }
+      }
+      if (progressFill) progressFill.style.width = Math.round(((index + 1) / queue.length) * 100) + '%';
+      updateBulkBarUI();
+      setTimeout(function() { step(index + 1); }, 300);
+    }).catch(function(err) {
+      failCount++;
+      var el = document.getElementById('bulk_log_' + item.id);
+      if (el) {
+        el.className = 'bulk-log-item fail';
+        el.innerHTML = '<span>❌ ' + esc(item.wo_number || item.id) + '</span><span>Koneksi terputus</span>';
+      }
+      if (progressFill) progressFill.style.width = Math.round(((index + 1) / queue.length) * 100) + '%';
+      updateBulkBarUI();
+      setTimeout(function() { step(index + 1); }, 300);
+    });
+  }
+
+  step(0);
+}
+
+function stopBulkQueue() {
+  bulkCancelled = true;
+  var btnStop = document.getElementById('btnBulkStopQueue');
+  if (btnStop) {
+    btnStop.disabled = true;
+    btnStop.textContent = '⏳ Menghentikan…';
+  }
+}
+
+function finishBulkApproval() {
+  closeModal('bulkProgressModal');
+  clearSelectedWos();
+  renderAll();
+  syncNow(true);
+}
+
 function renderPendingList(){
   // WO yang keputusannya SUDAH diambil dan sedang mengantre kirim tidak
   // ditampilkan lagi. Tanpa penyaringan ini kartunya bisa muncul kembali:
@@ -3322,28 +3693,49 @@ function renderPendingList(){
     return '<div class="empty">Tidak ada WO pending dalam scope Anda.' +
            (tertahan ? '<br><span class="sub">' + tertahan + ' keputusan sedang dikirim.</span>' : '') + '</div>';
   }
-  var html='<div class="sub">'+daftar.length+' WO menunggu approval'+
-           (tertahan ? ' · '+tertahan+' keputusan sedang dikirim' : '')+'</div>';
+
+  var selCount = 0;
+  daftar.forEach(function(w){ if (selectedWoMap[String(w.id)]) selCount++; });
+  var allSelected = daftar.length > 0 && selCount === daftar.length;
+
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">' +
+    '<div class="sub" style="margin:0">' + daftar.length + ' WO menunggu approval' +
+      (tertahan ? ' · ' + tertahan + ' keputusan sedang dikirim' : '') + '</div>' +
+    '<button type="button" class="mini ' + (allSelected ? '' : 'gray') + '" id="btnSelectAllWo" onclick="toggleSelectAllPending()">' +
+      (allSelected ? '✖️ Batalkan Semua' : '☑️ Pilih Semua di Halaman Ini') +
+    '</button>' +
+  '</div>';
+
   daftar.forEach(function(wo){
     var isL2 = wo.status==='pending_superintendent';
-    html+='<div class="card"><div class="cardTop"><b>'+esc(wo.wo_number)+'</b></div>'+
+    var isSelected = !!selectedWoMap[String(wo.id)];
+    html += '<div class="card' + (isSelected ? ' selected-wo-card' : '') + '" id="wo_card_' + esc(String(wo.id)) + '" onclick="onCardClick(event, \'' + esc(String(wo.id)) + '\')" style="cursor:pointer">' +
+      '<div class="cardTop" style="display:flex;justify-content:space-between;align-items:center">' +
+        '<b>' + esc(wo.wo_number) + '</b>' +
+        '<label class="wo-chk-wrap" onclick="event.stopPropagation()" title="Pilih untuk Bulk Approve">' +
+          '<input type="checkbox" class="wo-select-chk" data-wo-id="' + esc(String(wo.id)) + '" ' + (isSelected ? 'checked' : '') + ' onchange="onWoSelectChange(\'' + esc(String(wo.id)) + '\', this.checked)">' +
+        '</label>' +
+      '</div>' +
       // Semua keterangan jadi SATU bilah menyambung di bawah nomor WO —
       // bukan badge terpencar di baris judul.
-      ketBar(wo, isL2)+ awBar(wo) +
-      '<div class="cardBody" style="margin-top:9px"><b>'+esc(wo.component_name||'-')+'</b>'+
+      ketBar(wo, isL2) + awBar(wo) +
+      '<div class="cardBody" style="margin-top:9px"><b>' + esc(wo.component_name || '-') + '</b>' +
       // Label–nilai sejajar. Tanpa ikon di sini: dulu hanya "Lokasi" berikon,
       // sehingga barisnya menjorok sendiri dan daftar jadi sulit dipindai.
       '<div class="woInfo">'+
-        (wo.unit_name ? '<span class="k">Unit</span><span class="v">'+esc(wo.unit_name)+'</span>' : '')+
-        '<span class="k">Lokasi</span><span class="v">'+esc(locLabel(wo.location))+'</span>'+
-        '<span class="k">Kondisi</span><span class="v">'+esc(wcLabel(wo.work_condition))+'</span>'+
-        '<span class="k">Waktu</span><span class="v"><b>'+fmtJamMenit(wo.actual_hours)+'</b> dari target '+fmtJamMenit(wo.target_hours)+'</span>'+
-        '<span class="k">Poin</span><span class="v">'+(wo.base_points||0)+' pts × unit '+(wo.unit_factor||1)+'</span>'+
-        '<span class="k">Tim</span><span class="v">'+teamStr(wo.team)+'</span>'+
-      '</div></div>'+
-      (wo.keterangan?'<div class="ket">📝 '+esc(wo.keterangan)+'</div>':'')+
-      (function(){ var q=queuedOpFor(wo.id); return q ? queuedNote(q)
-        : '<button class="big" onclick="openApproveForm(\''+esc(String(wo.id))+'\')">📋 Review & Approve</button>'+cancelBtn(wo); })()+'</div>';
+        (wo.unit_name ? '<span class="k">Unit</span><span class="v">' + esc(wo.unit_name) + '</span>' : '') +
+        '<span class="k">Lokasi</span><span class="v">' + esc(locLabel(wo.location)) + '</span>' +
+        '<span class="k">Kondisi</span><span class="v">' + esc(wcLabel(wo.work_condition)) + '</span>' +
+        '<span class="k">Waktu</span><span class="v"><b>' + fmtJamMenit(wo.actual_hours) + '</b> dari target ' + fmtJamMenit(wo.target_hours) + '</span>' +
+        '<span class="k">Poin</span><span class="v">' + (wo.base_points || 0) + ' pts × unit ' + (wo.unit_factor || 1) + '</span>' +
+        '<span class="k">Tim</span><span class="v">' + teamStr(wo.team) + '</span>' +
+      '</div></div>' +
+      (wo.keterangan ? '<div class="ket">📝 ' + esc(wo.keterangan) + '</div>' : '') +
+      (function(){
+        var q = queuedOpFor(wo.id);
+        return q ? queuedNote(q)
+                 : '<button class="big" onclick="event.stopPropagation(); openApproveForm(\'' + esc(String(wo.id)) + '\')">📋 Review & Approve</button>' + cancelBtn(wo);
+      })() + '</div>';
   });
   return html;
 }
