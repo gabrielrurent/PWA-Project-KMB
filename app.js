@@ -18,7 +18,7 @@ var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbxh4086qGRZGDqA
 // service worker yang benar-benar aktif (lihat syncVersionFromCache).
 // Dengan begitu rilis cukup mengubah CACHE di sw.js; angka di sini tak bisa lagi
 // tertinggal diam-diam seperti dulu (APP_VERSION v26 vs CACHE v34).
-var APP_VERSION = 'projek-v11'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'projek-v12'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 
 // ── Pembaruan versi otomatis ────────────────────────────────────────────────
 // sw.js sudah skipWaiting()+clients.claim(), jadi versi baru mengambil alih
@@ -3298,8 +3298,10 @@ function tahapSaya() {
   return null;
 }
 
-/* ── BULK APPROVAL (L1/L2) ── */
+/* ── BULK APPROVAL (L1/L2) & COMPACT VIEW ── */
+var MAX_BULK_SELECT = 50;
 var selectedWoMap = {};
+var expandedWoMap = {};
 var bulkRunning = false;
 var bulkCancelled = false;
 
@@ -3307,6 +3309,11 @@ function onWoSelectChange(woId, isChecked) {
   var sid = String(woId);
   var prevCount = Object.keys(selectedWoMap).length;
   if (isChecked) {
+    if (prevCount >= MAX_BULK_SELECT && !selectedWoMap[sid]) {
+      _syncCardSelectionUI(sid, false);
+      toast('Batas Maksimum 50 WO: Maksimal 50 Work Order yang dapat dipilih sekaligus untuk menjaga kestabilan sistem.');
+      return;
+    }
     var found = null;
     for (var i = 0; i < (S.pending || []).length; i++) {
       if (String(S.pending[i].id) === sid) { found = S.pending[i]; break; }
@@ -3338,7 +3345,7 @@ function _syncCardSelectionUI(woId, isChecked) {
 }
 
 function onCardClick(e, woId) {
-  if (e.target.closest('button, select, input, textarea, a, .wo-chk-wrap')) return;
+  if (e.target.closest('button, select, input, textarea, a, .wo-chk-wrap, .compact-detail-pane')) return;
   var isCurrentlySelected = !!selectedWoMap[String(woId)];
   onWoSelectChange(woId, !isCurrentlySelected);
 }
@@ -3355,18 +3362,38 @@ function toggleSelectAllPending() {
   var daftar = milikSaya.filter(function(wo){ return !opMenunggu[String(wo.id)]; });
   if (!daftar.length) return;
 
-  var allChecked = daftar.every(function(w){ return !!selectedWoMap[String(w.id)]; });
-  if (allChecked) {
-    selectedWoMap = {};
-    toast('Semua pilihan WO dibatalkan');
+  var curSel = 0;
+  daftar.forEach(function(w){ if (selectedWoMap[String(w.id)]) curSel++; });
+
+  if (daftar.length > MAX_BULK_SELECT) {
+    if (curSel >= MAX_BULK_SELECT) {
+      selectedWoMap = {};
+      toast('Semua pilihan WO dibatalkan');
+    } else {
+      selectedWoMap = {};
+      for (var i = 0; i < MAX_BULK_SELECT; i++) {
+        var w = daftar[i];
+        selectedWoMap[String(w.id)] = Object.assign({}, w, {
+          safety_incident: (w.safety_incident === true || String(w.safety_incident).toLowerCase() === 'true'),
+          mtbf_redo_status: (w.mtbf_redo_status === 'redo') ? 'redo' : 'first_time'
+        });
+      }
+      toast('Batas kuota 50 WO telah tercapai (50 WO pertama dipilih)');
+    }
   } else {
-    daftar.forEach(function(w){
-      selectedWoMap[String(w.id)] = Object.assign({}, w, {
-        safety_incident: (w.safety_incident === true || String(w.safety_incident).toLowerCase() === 'true'),
-        mtbf_redo_status: (w.mtbf_redo_status === 'redo') ? 'redo' : 'first_time'
+    var allChecked = daftar.every(function(w){ return !!selectedWoMap[String(w.id)]; });
+    if (allChecked) {
+      selectedWoMap = {};
+      toast('Semua pilihan WO dibatalkan');
+    } else {
+      daftar.forEach(function(w){
+        selectedWoMap[String(w.id)] = Object.assign({}, w, {
+          safety_incident: (w.safety_incident === true || String(w.safety_incident).toLowerCase() === 'true'),
+          mtbf_redo_status: (w.mtbf_redo_status === 'redo') ? 'redo' : 'first_time'
+        });
       });
-    });
-    toast(daftar.length + ' WO berhasil dipilih');
+      toast(daftar.length + ' WO berhasil dipilih');
+    }
   }
   renderAll();
 }
@@ -3384,7 +3411,7 @@ function updateBulkBarUI() {
   var bar = document.getElementById('bulkFloatingBar');
   var badge = document.getElementById('bulkSelectedBadge');
   var countText = document.getElementById('bulkApproveCountText');
-  if (badge) badge.textContent = count + ' WO dipilih';
+  if (badge) badge.textContent = '[ ' + count + ' / ' + MAX_BULK_SELECT + ' ] WO Dipilih';
   if (countText) countText.textContent = count;
   if (bar) {
     if (count > 0 && S.tab === 'approval' && (S.appSub === 'pending' || !S.appSub)) {
@@ -3406,9 +3433,122 @@ function updateBulkBarUI() {
     });
     var milikSaya = _tahap ? S.pending.filter(function(wo){ return String(wo.status) === _tahap; }) : S.pending;
     var daftar = milikSaya.filter(function(wo){ return !opMenunggu[String(wo.id)]; });
-    var allChecked = daftar.length > 0 && count >= daftar.length && daftar.every(function(w){ return !!selectedWoMap[String(w.id)]; });
-    btnSelAll.textContent = allChecked ? '✖️ Batalkan Semua' : '☑️ Pilih Semua di Halaman Ini';
-    btnSelAll.className = 'mini ' + (allChecked ? '' : 'gray');
+    if (daftar.length > MAX_BULK_SELECT) {
+      var is50Selected = count >= MAX_BULK_SELECT;
+      btnSelAll.textContent = is50Selected ? '✖️ Batal Pilih (50 WO)' : '☑️ Pilih 50 WO Pertama';
+      btnSelAll.className = 'mini ' + (is50Selected ? '' : 'gray');
+    } else {
+      var allChecked = daftar.length > 0 && count >= daftar.length && daftar.every(function(w){ return !!selectedWoMap[String(w.id)]; });
+      btnSelAll.textContent = allChecked ? '✖️ Batalkan Semua' : '☑️ Pilih Semua di Halaman Ini';
+      btnSelAll.className = 'mini ' + (allChecked ? '' : 'gray');
+    }
+  }
+}
+
+/* ── DETAIL EXPAND & QUICK ACTIONS ── */
+function toggleWoDetail(woId) {
+  var sid = String(woId);
+  var detailEl = document.getElementById('wo_detail_' + sid);
+  var btnEl = document.getElementById('btn_detail_toggle_' + sid);
+  if (!detailEl) return;
+  var isExpanded = detailEl.style.display !== 'none';
+  if (isExpanded) {
+    detailEl.style.display = 'none';
+    delete expandedWoMap[sid];
+    if (btnEl) btnEl.innerHTML = '👁️ Lihat Detail';
+  } else {
+    detailEl.style.display = 'block';
+    expandedWoMap[sid] = true;
+    if (btnEl) btnEl.innerHTML = '🔼 Tutup Detail';
+  }
+  updateToggleAllBtnUI();
+}
+
+function toggleAllWoDetails() {
+  var btn = document.getElementById('btnToggleAllDetails');
+  var allPanes = document.querySelectorAll('.compact-detail-pane');
+  if (!allPanes.length) return;
+  
+  var anyClosed = false;
+  allPanes.forEach(function(pane) {
+    if (pane.style.display === 'none') anyClosed = true;
+  });
+
+  allPanes.forEach(function(pane) {
+    var id = pane.getAttribute('data-wo-id');
+    var btnToggle = document.getElementById('btn_detail_toggle_' + id);
+    if (anyClosed) {
+      pane.style.display = 'block';
+      expandedWoMap[id] = true;
+      if (btnToggle) btnToggle.innerHTML = '🔼 Tutup Detail';
+    } else {
+      pane.style.display = 'none';
+      delete expandedWoMap[id];
+      if (btnToggle) btnToggle.innerHTML = '👁️ Lihat Detail';
+    }
+  });
+
+  if (btn) btn.innerHTML = anyClosed ? '📁 Tutup Semua Detail' : '📂 Buka Semua Detail';
+}
+
+function updateToggleAllBtnUI() {
+  var btn = document.getElementById('btnToggleAllDetails');
+  if (!btn) return;
+  var allPanes = document.querySelectorAll('.compact-detail-pane');
+  if (!allPanes.length) return;
+  var allOpen = true;
+  allPanes.forEach(function(p) {
+    if (p.style.display === 'none') allOpen = false;
+  });
+  btn.innerHTML = allOpen ? '📁 Tutup Semua Detail' : '📂 Buka Semua Detail';
+}
+
+function quickEditWo(woId) {
+  openApproveForm(woId);
+  var ovBody = document.getElementById('ovBody');
+  if (ovBody && ovBody.style.display === 'none') {
+    toggleOverride();
+  }
+}
+
+function quickReturnWo(woId, woNumber) {
+  var reason = prompt('Kembalikan ' + (woNumber || 'WO') + ' ke mekanik untuk revisi.\n\nTuliskan instruksi / alasan revisi:');
+  if (!reason || !reason.trim()) return;
+  var wo = null;
+  for (var i = 0; i < (S.pending || []).length; i++) {
+    if (String(S.pending[i].id) === String(woId)) { wo = S.pending[i]; break; }
+  }
+  if (!wo) return;
+  var stage = (wo.status === 'pending_superintendent') ? 'superintendent' : 'supervisor';
+  var op = {
+    op_id: uuid(),
+    seq: (_enqSeq++),
+    action: 'reject',
+    wo_id: wo.id,
+    wo_number: wo.wo_number || wo.id,
+    payload: { wo_id: wo.id, stage: stage, reason: 'Revisi: ' + reason.trim() },
+    status: 'queued',
+    created_at: new Date().toISOString(),
+    label: 'Kembalikan ' + (wo.wo_number || wo.id)
+  };
+  obPut(op).then(refreshOutbox).then(function() {
+    _lepasDariAntrean(wo.id);
+    renderAll();
+    toast('↩ ' + (wo.wo_number || 'WO') + ' dikembalikan ke mekanik untuk revisi');
+    syncNow(false);
+  });
+}
+
+function quickRejectWo(woId, woNumber) {
+  openApproveForm(woId);
+  var sec = document.getElementById('aRejectSection');
+  if (sec) sec.style.display = 'block';
+  var rInp = document.getElementById('aReason');
+  if (rInp) {
+    setTimeout(function() {
+      rInp.scrollIntoView({ behavior: 'smooth' });
+      rInp.focus();
+    }, 150);
   }
 }
 
@@ -3425,6 +3565,8 @@ function openBulkApproveModal() {
   if (dEl) dEl.textContent = count;
   var cBtn = document.getElementById('bulkConfirmCountBtn');
   if (cBtn) cBtn.textContent = count;
+  var sumEl = document.getElementById('bulkConfirmFooterSummary');
+  if (sumEl) sumEl.textContent = count + ' WO Terpilih';
   var notesInput = document.getElementById('bulkGlobalNotes');
   if (notesInput) notesInput.value = '';
 
@@ -3726,27 +3868,12 @@ function finishBulkApproval() {
 }
 
 function renderPendingList(){
-  // WO yang keputusannya SUDAH diambil dan sedang mengantre kirim tidak
-  // ditampilkan lagi. Tanpa penyaringan ini kartunya bisa muncul kembali:
-  // approve → kartu lepas → server menjawab "ramai" (retry_later) → pullPending
-  // di siklus yang sama masih melaporkannya pending → kartu balik, padahal
-  // approver baru saja melihat "disetujui". Jejaknya tetap ada di bilah
-  // "📮 menunggu sinyal", jadi tak ada yang lenyap tanpa keterangan.
-  // HANYA op keputusan akhir yang menyembunyikan kartu. `save_override` sengaja
-  // TIDAK ikut: menyimpan override adalah langkah di TENGAH menilai, bukan
-  // keputusan. Kalau ikut disaring, approver yang sedang offline menyimpan
-  // override lalu kehilangan kartunya — dan tak bisa approve sama sekali sampai
-  // ada sinyal.
   var OP_KEPUTUSAN = ['approve_l1','approve_l2','reject','approve_transfer','reject_transfer'];
   var opMenunggu = {};
   (S.outbox || []).forEach(function(o) {
     if ((o.status === 'queued' || o.status === 'failed_retry') &&
         o.wo_id && OP_KEPUTUSAN.indexOf(o.action) !== -1) opMenunggu[String(o.wo_id)] = true;
   });
-  // Buang dulu kartu yang tahapnya sudah bukan urusan role ini (lihat
-  // tahapSaya()). Ini sisa hanyutan status lokal, BUKAN keputusan yang sedang
-  // dikirim — maka ia tidak boleh ikut dihitung sebagai `tertahan`, supaya
-  // bilah "keputusan sedang dikirim" tidak melaporkan angka yang tidak ada.
   var _tahap = tahapSaya();
   var milikSaya = _tahap
     ? S.pending.filter(function(wo){ return String(wo.status) === _tahap; })
@@ -3761,47 +3888,270 @@ function renderPendingList(){
 
   var selCount = 0;
   daftar.forEach(function(w){ if (selectedWoMap[String(w.id)]) selCount++; });
-  var allSelected = daftar.length > 0 && selCount === daftar.length;
+  var is50Limit = daftar.length > MAX_BULK_SELECT;
+  var allSelected = is50Limit ? (selCount >= MAX_BULK_SELECT) : (daftar.length > 0 && selCount === daftar.length);
 
-  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">' +
-    '<div class="sub" style="margin:0">' + daftar.length + ' WO menunggu approval' +
-      (tertahan ? ' · ' + tertahan + ' keputusan sedang dikirim' : '') + '</div>' +
-    '<button type="button" class="mini ' + (allSelected ? '' : 'gray') + '" id="btnSelectAllWo" onclick="toggleSelectAllPending()">' +
-      (allSelected ? '✖️ Batalkan Semua' : '☑️ Pilih Semua di Halaman Ini') +
-    '</button>' +
+  var anyExpanded = false;
+  daftar.forEach(function(w){ if (expandedWoMap[String(w.id)]) anyExpanded = true; });
+
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap">' +
+    '<div>' +
+      '<div class="sub" style="margin:0;font-weight:700;color:var(--text);font-size:13px">' + daftar.length + ' WO Menunggu Approval' +
+        (tertahan ? ' · <span style="color:#B45309">' + tertahan + ' antre kirim</span>' : '') + '</div>' +
+      (is50Limit ? '<div style="font-size:11px;color:#d97706;margin-top:2px">Maksimal ' + MAX_BULK_SELECT + ' WO per sesi bulk approval</div>' : '') +
+    '</div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+      '<button type="button" class="mini ' + (allSelected ? '' : 'gray') + '" id="btnSelectAllWo" onclick="toggleSelectAllPending()">' +
+        (is50Limit ? (allSelected ? '✖️ Batal Pilih (50 WO)' : '☑️ Pilih 50 WO Pertama')
+                   : (allSelected ? '✖️ Batalkan Semua' : '☑️ Pilih Semua di Halaman Ini')) +
+      '</button>' +
+      '<button type="button" class="mini gray" id="btnToggleAllDetails" onclick="toggleAllWoDetails()">' +
+        (anyExpanded ? '📁 Tutup Semua Detail' : '📂 Buka Semua Detail') +
+      '</button>' +
+    '</div>' +
   '</div>';
 
   daftar.forEach(function(wo){
-    var isL2 = wo.status==='pending_superintendent';
-    var isSelected = !!selectedWoMap[String(wo.id)];
-    html += '<div class="card' + (isSelected ? ' selected-wo-card' : '') + '" id="wo_card_' + esc(String(wo.id)) + '" onclick="onCardClick(event, \'' + esc(String(wo.id)) + '\')" style="cursor:pointer">' +
-      '<div class="cardTop" style="display:flex;justify-content:space-between;align-items:center">' +
-        '<b>' + esc(wo.wo_number) + '</b>' +
-        '<label class="wo-chk-wrap" onclick="event.stopPropagation()" title="Pilih untuk Bulk Approve">' +
-          '<input type="checkbox" class="wo-select-chk" data-wo-id="' + esc(String(wo.id)) + '" ' + (isSelected ? 'checked' : '') + ' onchange="onWoSelectChange(\'' + esc(String(wo.id)) + '\', this.checked)">' +
-        '</label>' +
+    var wid = String(wo.id);
+    var isL2 = (wo.status === 'pending_superintendent');
+    var isSelected = !!selectedWoMap[wid];
+    var isExpanded = !!expandedWoMap[wid];
+
+    // Kolom 1 (Identitas & Badges Peringatan)
+    var warningBadges = [];
+    if (wo.duplicate_warning || wo.twin_warning || wo.is_duplicate) {
+      warningBadges.push('<span class="c-badge-pill c-badge-warn" title="Peringatan WO Kembar / Mirip">⚠️ Mirip/Kembar</span>');
+    }
+    var revCount = wo.resubmission_count || wo.revision_count || wo.revisi_ke;
+    if (revCount && revCount > 1) {
+      warningBadges.push('<span class="c-badge-pill c-badge-rev">↩ Kiriman Ulang Putaran ke-' + esc(String(revCount)) + '</span>');
+    }
+    if (wo.created_by_is_mechanic) {
+      warningBadges.push('<span class="c-badge-pill c-badge-mech">👷 Dibuat Mekanik</span>');
+    }
+    if (wo.wo_group_id) {
+      warningBadges.push('<span class="c-badge-pill c-badge-grp">📦 Borongan</span>');
+    }
+    if (wo.has_override_spv || wo.has_override_supt) {
+      var sWho = (wo.has_override_spv && wo.has_override_supt) ? 'L1 & L2' : (wo.has_override_spv ? 'L1' : 'L2');
+      warningBadges.push('<span class="c-badge-pill" style="background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE">✏️ Override ' + sWho + '</span>');
+    }
+
+    var levelBadge = '<span class="badge" style="background:' + (isL2 ? WARNA.l2 : WARNA.l1) + ';font-size:10px;padding:2px 7px">' + (isL2 ? 'Level 2' : 'Level 1') + '</span>';
+
+    // Kolom 2 (Unit & Lokasi)
+    var locBadge = (wo.location === 'field')
+      ? '<span class="badge" style="background:#0284C7;font-size:10px;padding:2px 6px">🚜 Lapangan</span>'
+      : '<span class="badge" style="background:#475569;font-size:10px;padding:2px 6px">🏭 Bengkel</span>';
+
+    // Kolom 3 (Pekerjaan)
+    var compName = esc(wo.component_name || wo.job_name || '-');
+    var partNum = esc(wo.component_id || wo.part_number || '-');
+    var secName = esc(_kapital(wo.section || 'General'));
+
+    // Kolom 4 (Durasi & Tim)
+    var durText = '⏱️ <b>' + fmtJamMenit(wo.actual_hours) + '</b> / tgt ' + fmtJamMenit(wo.target_hours);
+    var atl = wo.timeliness;
+    var tlBadge = '';
+    if (atl) {
+      var tlBg = (atl.status === 'on_time') ? WARNA.onTime : (atl.status === 'late' ? WARNA.late : WARNA.wayLate);
+      var tlLbl = _kapital(atl.label || atl.status || 'On Time');
+      tlBadge = '<span class="badge" style="background:' + tlBg + ';font-size:10px;padding:2px 6px">' + esc(tlLbl) + '</span>';
+    }
+    var teamSummary = (wo.team_names && wo.team_names.length)
+      ? wo.team_names.map(function(n){ return esc(n); }).join(', ')
+      : (teamStr(wo.team) || '-');
+
+    // Kolom 5 (Aksi Cepat)
+    var btnDetailText = isExpanded ? '🔼 Tutup Detail' : '👁️ Lihat Detail';
+
+    html += '<div class="compact-wo-item' + (isSelected ? ' selected-wo-card' : '') + '" id="wo_card_' + esc(wid) + '" onclick="onCardClick(event, \'' + esc(wid) + '\')">' +
+      '<div class="compact-wo-row">' +
+        // Kolom 1: Identitas
+        '<div class="c-col">' +
+          '<div class="c-col-id-header">' +
+            '<label class="wo-chk-wrap" onclick="event.stopPropagation()" title="Pilih untuk Bulk Approve">' +
+              '<input type="checkbox" class="wo-select-chk" data-wo-id="' + esc(wid) + '" ' + (isSelected ? 'checked' : '') + ' onchange="onWoSelectChange(\'' + esc(wid) + '\', this.checked)">' +
+            '</label>' +
+            '<div>' +
+              '<span class="c-wo-num">' + esc(wo.wo_number || wid) + '</span>' +
+              '<div class="c-wo-time">' + esc(wo.created_at_str || '-') + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="c-badges-wrap">' +
+            levelBadge +
+            warningBadges.join('') +
+          '</div>' +
+        '</div>' +
+
+        // Kolom 2: Unit & Lokasi
+        '<div class="c-col">' +
+          '<div class="c-unit-title">🚜 ' + esc(wo.unit_name || wo.unit_id || '-') + '</div>' +
+          (wo.unit_name && wo.unit_id ? '<div class="c-sub-info">ID: ' + esc(wo.unit_id) + '</div>' : '') +
+          '<div>' + locBadge + '</div>' +
+        '</div>' +
+
+        // Kolom 3: Pekerjaan
+        '<div class="c-col">' +
+          '<div class="c-job-name" title="' + compName + '">' + compName + '</div>' +
+          '<div class="c-sub-info">Part: ' + partNum + '</div>' +
+          '<div style="font-size:11px;color:var(--text-secondary);font-weight:600">📁 ' + secName + '</div>' +
+        '</div>' +
+
+        // Kolom 4: Durasi & Tim
+        '<div class="c-col">' +
+          '<div class="c-duration-text">' + durText + '</div>' +
+          '<div style="display:flex;align-items:center;gap:4px">' + tlBadge + '</div>' +
+          '<div class="c-team-summary" title="' + teamSummary + '">👥 ' + teamSummary + '</div>' +
+        '</div>' +
+
+        // Kolom 5: Aksi Cepat
+        '<div class="compact-col-actions">' +
+          '<button type="button" class="btn-detail-toggle" id="btn_detail_toggle_' + esc(wid) + '" onclick="event.stopPropagation(); toggleWoDetail(\'' + esc(wid) + '\')">' + btnDetailText + '</button>' +
+          '<button type="button" class="btn-act-approve" onclick="event.stopPropagation(); openApproveForm(\'' + esc(wid) + '\')">✓ Approve</button>' +
+          '<button type="button" class="btn-act-icon" title="Edit Override" onclick="event.stopPropagation(); quickEditWo(\'' + esc(wid) + '\')">✏️ Edit</button>' +
+          '<button type="button" class="btn-act-icon" title="Kembalikan (Minta Revisi)" onclick="event.stopPropagation(); quickReturnWo(\'' + esc(wid) + '\', \'' + esc(wo.wo_number) + '\')">↩ Kembalikan</button>' +
+          '<button type="button" class="btn-act-icon danger" title="Batalkan WO" onclick="event.stopPropagation(); openCancelForm(\'' + esc(wid) + '\', \'' + esc(wo.wo_number) + '\')">🚫 Batal</button>' +
+          '<button type="button" class="btn-act-icon danger" title="Tolak WO" onclick="event.stopPropagation(); quickRejectWo(\'' + esc(wid) + '\', \'' + esc(wo.wo_number) + '\')">✗ Tolak</button>' +
+        '</div>' +
       '</div>' +
-      // Semua keterangan jadi SATU bilah menyambung di bawah nomor WO —
-      // bukan badge terpencar di baris judul.
-      ketBar(wo, isL2) + awBar(wo) +
-      '<div class="cardBody" style="margin-top:9px"><b>' + esc(wo.component_name || '-') + '</b>' +
-      // Label–nilai sejajar. Tanpa ikon di sini: dulu hanya "Lokasi" berikon,
-      // sehingga barisnya menjorok sendiri dan daftar jadi sulit dipindai.
-      '<div class="woInfo">'+
-        (wo.unit_name ? '<span class="k">Unit</span><span class="v">' + esc(wo.unit_name) + '</span>' : '') +
-        '<span class="k">Lokasi</span><span class="v">' + esc(locLabel(wo.location)) + '</span>' +
-        '<span class="k">Kondisi</span><span class="v">' + esc(wcLabel(wo.work_condition)) + '</span>' +
-        '<span class="k">Waktu</span><span class="v"><b>' + fmtJamMenit(wo.actual_hours) + '</b> dari target ' + fmtJamMenit(wo.target_hours) + '</span>' +
-        '<span class="k">Poin</span><span class="v">' + (wo.base_points || 0) + ' pts × unit ' + (wo.unit_factor || 1) + '</span>' +
-        '<span class="k">Tim</span><span class="v">' + teamStr(wo.team) + '</span>' +
-      '</div></div>' +
-      (wo.keterangan ? '<div class="ket">📝 ' + esc(wo.keterangan) + '</div>' : '') +
-      (function(){
-        var q = queuedOpFor(wo.id);
-        return q ? queuedNote(q)
-                 : '<button class="big" onclick="event.stopPropagation(); openApproveForm(\'' + esc(String(wo.id)) + '\')">📋 Review & Approve</button>' + cancelBtn(wo);
-      })() + '</div>';
+
+      // Expandable Detail Accordion Pane
+      renderWoDetailPane(wo, isL2, wid) +
+    '</div>';
   });
+
+  return html;
+}
+
+function renderWoDetailPane(wo, isL2, wid) {
+  var isExpanded = !!expandedWoMap[wid];
+  var html = '<div class="compact-detail-pane" id="wo_detail_' + esc(wid) + '" data-wo-id="' + esc(wid) + '" style="' + (isExpanded ? 'display:block' : 'display:none') + '">';
+
+  // 1. Peringatan WO Kembar
+  var twinInfo = wo.duplicate_warning || wo.twin_warning || wo.twin_info;
+  if (twinInfo) {
+    var twinText = (typeof twinInfo === 'string') ? twinInfo : JSON.stringify(twinInfo);
+    html += '<div class="detail-section-box warn">' +
+      '⚠️ <b>Peringatan WO Kembar / Mirip:</b> ' + esc(twinText) +
+      '<div style="font-size:11px;margin-top:4px">Periksa selisih jam pengerjaan, nama mekanik pembuat, dan status pembayaran sebelum mengesahkan.</div>' +
+    '</div>';
+  } else {
+    html += '<div class="detail-section-box ok">' +
+      '✅ <b>Verifikasi Duplikasi:</b> Tidak terdeteksi WO kembar/duplikat dalam periode ini.' +
+    '</div>';
+  }
+
+  // 2. Riwayat Pengembalian / Revisi
+  var revInfo = wo.revision_history || wo.return_reason || wo.return_note || wo.revision_notes;
+  if (revInfo) {
+    var revText = (typeof revInfo === 'string') ? revInfo : JSON.stringify(revInfo);
+    html += '<div class="detail-section-box info">' +
+      '↩️ <b>Riwayat Pengembalian / Revisi Sebelumnya:</b><br>' + esc(revText) +
+    '</div>';
+  }
+
+  // 3. Rincian Ban / Tyre (khusus rekondisi / tyreman)
+  var isTyre = (wo.section === 'vessel' || wo.section === 'tyreman' || !!wo.tyre_data || !!wo.tyre_position);
+  if (isTyre) {
+    var tPos = wo.tyre_position || wo.posisi_ban || '-';
+    var tPresB = wo.tyre_pressure_before || '-';
+    var tPresA = wo.tyre_pressure_after || '-';
+    var tRtd = wo.tyre_rtd || '-';
+    var tTemp = wo.tyre_temp || '-';
+    var tAct = wo.tyre_action || wo.tyre_status || 'Lepas / Pasang / Repair';
+    html += '<div class="detail-section-box" style="background:#F0FDF4;border:1px solid #BBF7D0;color:#166534">' +
+      '<b style="text-transform:uppercase;font-size:11px">🛞 Rincian Pemeriksaan Ban (Tyre):</b>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:6px">' +
+        '<div>Posisi: <b>' + esc(String(tPos)) + '</b></div>' +
+        '<div>Tekanan: <b>' + esc(String(tPresB)) + ' → ' + esc(String(tPresA)) + ' PSI</b></div>' +
+        '<div>RTD: <b>' + esc(String(tRtd)) + ' mm</b></div>' +
+        '<div>Suhu: <b>' + esc(String(tTemp)) + ' °C</b></div>' +
+        '<div>Tindakan: <b>' + esc(String(tAct)) + '</b></div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // 4. Grid Spesifikasi
+  var effPoints = (wo.base_points || 0) * (wo.unit_factor || 1) * (wo.timeliness ? (wo.timeliness.factor || 1) : 1);
+  html += '<div class="detail-grid-specs">' +
+    '<div class="spec-item"><span class="spec-k">Komponen / Job</span><span class="spec-v">' + esc(wo.component_name || '-') + '</span></div>' +
+    '<div class="spec-item"><span class="spec-k">Nomor Part / ID</span><span class="spec-v">' + esc(wo.component_id || wo.part_number || '-') + '</span></div>' +
+    '<div class="spec-item"><span class="spec-k">Unit &amp; Tipe</span><span class="spec-v">' + esc(wo.unit_name || '-') + ' (' + esc(wo.unit_id || '-') + ')</span></div>' +
+    '<div class="spec-item"><span class="spec-k">Unit Factor</span><span class="spec-v">' + (wo.unit_factor || 1) + ' <small style="color:var(--text-secondary)">(tetap)</small></span></div>' +
+    '<div class="spec-item"><span class="spec-k">Kondisi Kerja</span><span class="spec-v">' + esc(wcLabel(wo.work_condition)) + '</span></div>' +
+    '<div class="spec-item"><span class="spec-k">Lokasi Kerja</span><span class="spec-v">' + esc(locLabel(wo.location)) + '</span></div>' +
+    '<div class="spec-item"><span class="spec-k">Base Points</span><span class="spec-v">' + (wo.base_points || 0) + ' pts</span></div>' +
+    '<div class="spec-item"><span class="spec-k">Estimasi Poin Akhir</span><span class="spec-v" style="color:var(--primary)">' + Math.round(effPoints * 10) / 10 + ' pts</span></div>' +
+    '<div class="spec-item"><span class="spec-k">Waktu Pengerjaan</span><span class="spec-v">' + fmtJamMenit(wo.actual_hours) + ' (Target: ' + fmtJamMenit(wo.target_hours) + ')</span></div>' +
+    '<div class="spec-item"><span class="spec-k">Pembuat WO</span><span class="spec-v">' + esc(wo.created_by_name || wo.created_by || '-') + '</span></div>' +
+  '</div>';
+
+  // Overrides & Judgment jika ada
+  if (wo.has_override_spv || wo.has_override_supt || wo.judgment) {
+    html += '<div class="detail-section-box" style="background:#EEF2FF;border:1px solid #C7D2FE;color:#3730A3">' +
+      '<b>✏️ Overrides &amp; Catatan Judgment Approver:</b><br>' +
+      (wo.judgment ? '<div style="margin-top:4px">💬 Judgment: <i>' + esc(wo.judgment) + '</i></div>' : '') +
+      '<div style="font-size:11px;margin-top:4px;color:#4338CA">' +
+        (wo.has_override_spv ? '• Override disimpan oleh L1 (Supervisor)<br>' : '') +
+        (wo.has_override_supt ? '• Override disimpan oleh L2 (Superintendent)<br>' : '') +
+      '</div>' +
+    '</div>';
+  }
+
+  // Teks Keterangan Lengkap
+  if (wo.keterangan) {
+    html += '<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px">' +
+      '<div style="font-weight:700;font-size:11px;color:var(--text-secondary);text-transform:uppercase;margin-bottom:4px">📝 Keterangan Pengerjaan:</div>' +
+      '<div style="color:var(--text);font-size:12.5px;line-height:1.4">' + esc(wo.keterangan) + '</div>' +
+    '</div>';
+  }
+
+  // 5. Daftar Anggota Tim Mekanik & Kontribusi
+  var team = wo.team || [];
+  html += '<div class="detail-team-box">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center">' +
+      '<b style="font-size:11px;text-transform:uppercase;color:var(--text-secondary)">👥 Tim Mekanik &amp; Persentase Kontribusi:</b>' +
+      '<span style="font-size:11px;color:var(--primary);font-weight:700">' + team.length + ' Mekanik</span>' +
+    '</div>';
+
+  if (team.length > 0) {
+    var sharePerMech = Math.round(100 / team.length);
+    html += '<table class="team-table">' +
+      '<thead>' +
+        '<tr>' +
+          '<th>Nama Mekanik</th>' +
+          '<th>ID / NIK</th>' +
+          '<th style="text-align:right">Kontribusi</th>' +
+          '<th style="text-align:right">Poin</th>' +
+        '</tr>' +
+      '</thead>' +
+      '<tbody>';
+    team.forEach(function(m) {
+      var mName = (typeof m === 'string') ? m : esc(m.mechanic_name || m.name || '-');
+      var mId = (typeof m === 'string') ? '-' : esc(m.mechanic_id || m.id || '-');
+      var mPct = (typeof m === 'object' && (m.share_pct || m.contribution_pct)) ? (m.share_pct || m.contribution_pct) : sharePerMech;
+      html += '<tr>' +
+        '<td><b>' + mName + '</b></td>' +
+        '<td style="color:var(--text-secondary)">' + mId + '</td>' +
+        '<td style="text-align:right;font-weight:700;color:var(--primary)">' + mPct + '%</td>' +
+        '<td style="text-align:right;font-weight:700">' + (wo.base_points || 0) + ' pts</td>' +
+      '</tr>';
+    });
+    html += '</tbody></table>';
+  } else {
+    var tNames = (wo.team_names || []).join(', ') || '-';
+    html += '<div style="margin-top:6px;color:var(--text)">' + esc(tNames) + ' <span class="sub" style="display:inline">(Kontribusi penuh 100%)</span></div>';
+  }
+  html += '</div>';
+
+  // Bottom action shortcut inside expanded detail
+  html += '<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px">' +
+    '<button type="button" class="mini" style="background:#10B981;color:#fff" onclick="event.stopPropagation(); openApproveForm(\'' + esc(wid) + '\')">✓ Approve WO Ini</button>' +
+    '<button type="button" class="mini secondary" onclick="event.stopPropagation(); toggleWoDetail(\'' + esc(wid) + '\')">🔼 Tutup Detail</button>' +
+  '</div>';
+
+  html += '</div>';
   return html;
 }
 function renderActiveList(){
